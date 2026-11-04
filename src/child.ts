@@ -107,6 +107,10 @@ function parseStringMap(name: string, raw: string): Record<string, string> {
 		if (typeof value !== "string" || !value.trim()) {
 			throw new ReviewConfigError(`${name} has an empty or non-string value for ${key}`);
 		}
+		// "company/" or "/kimi-k3" usually means a shell variable was empty when the map was written.
+		if (/^\/|\/(:|$)/.test(value.trim())) {
+			throw new ReviewConfigError(`${name} has an incomplete model for ${key}: ${JSON.stringify(value)}`);
+		}
 	}
 	return parsed as Record<string, string>;
 }

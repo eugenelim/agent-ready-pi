@@ -203,6 +203,9 @@ describe("per-role models", () => {
 			['{"implementer":"company/x","shaping-reviewer":"company/y"}', /unknown role: implementer/],
 			['["company/x"]', /must be a JSON object/],
 			['{"shaping-reviewer":""}', /empty or non-string value/],
+			['{"shaping-reviewer":"company/"}', /incomplete model for shaping-reviewer: "company\/"/],
+			['{"shaping-reviewer":"/kimi-k3"}', /incomplete model/],
+			['{"shaping-reviewer":"company/:high"}', /incomplete model/],
 			["{", /not valid JSON/],
 		];
 		for (const [value, pattern] of cases) {
