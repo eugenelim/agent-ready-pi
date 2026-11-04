@@ -7,7 +7,7 @@ import { lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-import { type Role, ReviewConfigError, parseAgentFile, toPiAllowlist } from "./roles.ts";
+import { ROLES, type Role, ReviewConfigError, parseAgentFile, toPiAllowlist } from "./roles.ts";
 
 /** Largest agent file this package will read. */
 const MAX_AGENT_FILE_BYTES = 1024 * 1024;
@@ -45,6 +45,7 @@ export interface ReviewResult {
 		agentFile: string;
 		allowlist: string[];
 		model: string | undefined;
+		modelSource: ModelSource;
 		exitCode: number;
 		killed: boolean;
 		stderr: string;
@@ -88,27 +89,76 @@ export function findAgentFile(role: Role, cwd: string, env: ReviewRequest["env"]
 	throw new ReviewConfigError(`no agent file for ${role}; looked in ${candidates.join(", ")}`);
 }
 
+/** Where the child's model came from, recorded in the result for audit. */
+export type ModelSource = "role" | "agent-model" | "parent" | "none";
+
+/** Parse a JSON object of string values from an environment variable, or throw. */
+function parseStringMap(name: string, raw: string): Record<string, string> {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		throw new ReviewConfigError(`${name} is not valid JSON`);
+	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new ReviewConfigError(`${name} must be a JSON object`);
+	}
+	for (const [key, value] of Object.entries(parsed)) {
+		if (typeof value !== "string" || !value.trim()) {
+			throw new ReviewConfigError(`${name} has an empty or non-string value for ${key}`);
+		}
+	}
+	return parsed as Record<string, string>;
+}
+
+/** A model reference without its optional `:<thinking>` suffix, for comparing models. */
+function baseModel(model: string): string {
+	const slash = model.indexOf("/");
+	const colon = model.indexOf(":", slash + 1);
+	return colon === -1 ? model : model.slice(0, colon);
+}
+
 /**
- * Pick the child's model. `AGENT_READY_PI_MODELS` is a JSON object mapping an
- * agent file's `model:` value (for example `opus`) to a Pi model pattern.
+ * Pick the child's model, most specific first:
+ *
+ * 1. `AGENT_READY_PI_ROLE_MODELS`, a JSON object keyed by role. When it is set,
+ *    it must name every role it is used for: a missing role fails closed
+ *    instead of falling back, and the adjudicator may not share the
+ *    adversarial reviewer's model, so it never judges its own family's findings.
+ * 2. `AGENT_READY_PI_MODELS`, a JSON object keyed by the agent file's `model:`
+ *    value (for example `opus`).
+ * 3. The parent's model.
  */
 export function resolveModel(
+	role: Role,
 	agentModel: string | undefined,
 	parentModel: string | undefined,
 	env: ReviewRequest["env"] = process.env,
-): string | undefined {
+): { model: string | undefined; source: ModelSource } {
+	const roleRaw = env?.AGENT_READY_PI_ROLE_MODELS;
+	if (roleRaw) {
+		const roleMap = parseStringMap("AGENT_READY_PI_ROLE_MODELS", roleRaw);
+		for (const key of Object.keys(roleMap)) {
+			if (!(ROLES as readonly string[]).includes(key)) {
+				throw new ReviewConfigError(`AGENT_READY_PI_ROLE_MODELS names an unknown role: ${key}`);
+			}
+		}
+		const model = roleMap[role];
+		if (!model) throw new ReviewConfigError(`AGENT_READY_PI_ROLE_MODELS has no model for ${role}`);
+		const reviewer = roleMap["adversarial-reviewer"];
+		if (role === "finding-adjudicator" && reviewer && baseModel(reviewer) === baseModel(model)) {
+			throw new ReviewConfigError(
+				"finding-adjudicator must not use the adversarial-reviewer's model in AGENT_READY_PI_ROLE_MODELS",
+			);
+		}
+		return { model, source: "role" };
+	}
 	const raw = env?.AGENT_READY_PI_MODELS;
 	if (raw && agentModel) {
-		let map: unknown;
-		try {
-			map = JSON.parse(raw);
-		} catch {
-			throw new ReviewConfigError("AGENT_READY_PI_MODELS is not valid JSON");
-		}
-		const mapped = (map as Record<string, unknown> | null)?.[agentModel];
-		if (typeof mapped === "string" && mapped) return mapped;
+		const mapped = parseStringMap("AGENT_READY_PI_MODELS", raw)[agentModel];
+		if (mapped) return { model: mapped, source: "agent-model" };
 	}
-	return parentModel;
+	return parentModel ? { model: parentModel, source: "parent" } : { model: undefined, source: "none" };
 }
 
 /** Build the child's argv. The fixed flags keep the child cold and non-recursive. */
@@ -153,7 +203,7 @@ export async function runReview(request: ReviewRequest): Promise<ReviewResult> {
 		throw new ReviewConfigError(`agent file ${agentFile} names ${agent.name}, not ${request.role}`);
 	}
 	const allowlist = toPiAllowlist(agent.tools);
-	const model = resolveModel(agent.model, request.parentModel, env);
+	const { model, source: modelSource } = resolveModel(request.role, agent.model, request.parentModel, env);
 
 	const scratch = mkdtempSync(join(tmpdir(), "agent-ready-pi-"));
 	try {
@@ -181,6 +231,7 @@ export async function runReview(request: ReviewRequest): Promise<ReviewResult> {
 				agentFile,
 				allowlist,
 				model,
+				modelSource,
 				exitCode: result.code,
 				killed,
 				stderr: result.stderr.slice(-4000),

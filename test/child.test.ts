@@ -141,6 +141,76 @@ describe("child argv per role", () => {
 	});
 });
 
+describe("per-role models", () => {
+	const mix = JSON.stringify({
+		"shaping-reviewer": "company/kimi-k3",
+		"adversarial-reviewer": "company/glm-5-3",
+		"finding-adjudicator": "company/kimi-k3:high",
+	});
+	const expected: Record<string, string> = {
+		"shaping-reviewer": "company/kimi-k3",
+		"adversarial-reviewer": "company/glm-5-3",
+		"finding-adjudicator": "company/kimi-k3:high",
+	};
+	for (const role of ROLES) {
+		it(`${role} uses its own model from AGENT_READY_PI_ROLE_MODELS`, async () => {
+			const { result, captured } = await review(
+				role,
+				fixtureRepo("repo"),
+				{ AGENT_READY_PI_ROLE_MODELS: mix, AGENT_READY_PI_MODELS: '{"opus":"company/other"}' },
+				{ parentModel: "company/parent" },
+			);
+			const args = captured!.args;
+			assert.equal(args[args.indexOf("--model") + 1], expected[role]);
+			assert.equal(result.details.model, expected[role]);
+			assert.equal(result.details.modelSource, "role");
+		});
+	}
+
+	it("records where the model came from when no role map is set", async () => {
+		const mapped = await review("shaping-reviewer", fixtureRepo("repo"), { AGENT_READY_PI_MODELS: '{"opus":"company/x"}' });
+		assert.equal(mapped.result.details.modelSource, "agent-model");
+		const parent = await review("shaping-reviewer", fixtureRepo("repo"), {}, { parentModel: "company/parent" });
+		assert.equal(parent.result.details.modelSource, "parent");
+		const none = await review("shaping-reviewer", fixtureRepo("repo"));
+		assert.equal(none.result.details.modelSource, "none");
+	});
+
+	it("fails closed for a role the map leaves out, without starting a child", async () => {
+		const repo = fixtureRepo("repo");
+		const partial = JSON.stringify({ "adversarial-reviewer": "company/glm-5-3" });
+		await assert.rejects(
+			review("finding-adjudicator", repo, { AGENT_READY_PI_ROLE_MODELS: partial }, { parentModel: "company/parent" }),
+			/no model for finding-adjudicator/,
+		);
+		assert.equal(existsSync(join(repo, "capture.json")), false);
+	});
+
+	it("refuses an adjudicator on the adversarial reviewer's model, ignoring the thinking suffix", async () => {
+		const same = JSON.stringify({
+			"shaping-reviewer": "company/kimi-k3",
+			"adversarial-reviewer": "company/glm-5-3:high",
+			"finding-adjudicator": "company/glm-5-3:max",
+		});
+		await assert.rejects(
+			review("finding-adjudicator", fixtureRepo("repo"), { AGENT_READY_PI_ROLE_MODELS: same }),
+			/must not use the adversarial-reviewer's model/,
+		);
+	});
+
+	it("rejects an unknown role, a non-object and an empty value", async () => {
+		const cases: [string, RegExp][] = [
+			['{"implementer":"company/x","shaping-reviewer":"company/y"}', /unknown role: implementer/],
+			['["company/x"]', /must be a JSON object/],
+			['{"shaping-reviewer":""}', /empty or non-string value/],
+			["{", /not valid JSON/],
+		];
+		for (const [value, pattern] of cases) {
+			await assert.rejects(review("shaping-reviewer", fixtureRepo("repo"), { AGENT_READY_PI_ROLE_MODELS: value }), pattern);
+		}
+	});
+});
+
 describe("prompt files", () => {
 	it("are written at mode 0600 and removed after the run", async () => {
 		const repo = fixtureRepo("repo");
