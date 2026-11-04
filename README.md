@@ -15,15 +15,41 @@ Pi needs Node.js 22.19 or newer.
 
 ```bash
 # Personal: written to ~/.pi/agent/settings.json
-pi install git:github.com/eugenelim/agent-ready-pi@v0.1.2
+pi install git:github.com/eugenelim/agent-ready-pi@v0.1.3
 
 # One project: written to the project's .pi/settings.json.
 # Pi loads it only after you trust the project.
-pi install -l git:github.com/eugenelim/agent-ready-pi@v0.1.2
+pi install -l git:github.com/eugenelim/agent-ready-pi@v0.1.3
 
 # Try it once without saving
 pi -e /path/to/agent-ready-pi
 ```
+
+### Upgrade
+
+Install the new tag. Pi replaces the old version in place, so there is
+nothing to remove:
+
+```bash
+pi install git:github.com/eugenelim/agent-ready-pi@v0.1.3
+pi list        # shows one entry, at the new tag
+```
+
+**Do not run `pi remove` with the old tag after upgrading.** Pi matches the
+package without its tag, so removing `@v0.1.2` removes the version you just
+installed. If `pi list` ever shows nothing for the package, install it again.
+
+### Remove
+
+```bash
+pi remove git:github.com/eugenelim/agent-ready-pi
+pi list        # the package is gone
+```
+
+This removes the settings entry and the downloaded copy. Add `-l` to remove a
+project install.
+
+### What the project needs
 
 The project also needs agent-ready Core installed, for two reasons:
 
@@ -192,6 +218,7 @@ should print `OK`. If it fails:
 | `404 status code (no body)` | The base URL is wrong. Pi sends requests to `<baseUrl>/chat/completions`, so the base URL ends at the API root, often `/v1` |
 | The endpoint redirects to `/login` | The URL is the browser app, or the endpoint did not recognise the key. Find the API path and key header with the check below |
 | `403` with `key_model_access_denied` | The model name is wrong, or your key may not use it. List the names your key can use with the check below |
+| `Unsupported thinking_effort='medium'; supported values are [...]` | The endpoint accepts other thinking levels for this model. Add a `thinkingLevelMap`, as shown for Kimi K3 in step 5 |
 | `Model "<id>" not found for provider "company". Using custom model id.` | The request reached the endpoint, but `models.json` has a different ID. Pi then ignores your limits. Make the `id` match |
 
 To list the models your key can use, run this check. It prints only model
@@ -218,16 +245,73 @@ or a redirect to `/login` means one of them is wrong.
 
 ### 5. Use it for reviewers
 
-To run Pi on this model, start it with `--model company/<endpoint model ID>`.
-Reviewer children then use it too.
+To run Pi and every reviewer on one model, start Pi with
+`--model company/<endpoint model ID>`. Reviewer children use the parent's
+model unless you map another.
 
-To keep Pi on another model and send only reviewers to GLM-5.3, map the
-agent files' `model:` value. Every agent-ready reviewer declares
-`model: opus`:
+#### Recommended: a model per role
+
+Use GLM-5.3 where tool use matters and Kimi K3 where reasoning matters:
+
+| Role | Model | Why |
+| --- | --- | --- |
+| Pi itself | GLM-5.3 | Long sessions with heavy tool use |
+| `adversarial-reviewer` | GLM-5.3 | Reproduces failures with `bash` |
+| `shaping-reviewer` | Kimi K3 | Judges a contract; reasoning matters most |
+| `finding-adjudicator` | Kimi K3 | A different model family from the reviewer whose findings it judges |
+
+First add Kimi K3 to the `company` provider in `models.json`, next to
+GLM-5.3. Use the endpoint's real limits:
+
+```json
+{
+  "id": "kimi-k3",
+  "name": "Kimi K3",
+  "reasoning": true,
+  "contextWindow": 1000000,
+  "maxTokens": 32768,
+  "thinkingLevelMap": {
+    "minimal": "low", "low": "low", "medium": "high",
+    "high": "high", "xhigh": "max", "max": "max"
+  }
+}
+```
+
+`thinkingLevelMap` translates Pi's thinking levels into values the endpoint
+accepts. Some Kimi K3 deployments accept only `low`, `high` and `max`, so
+Pi's default `medium` is sent as `high`.
+
+Then map each role and start Pi on GLM-5.3:
+
+```bash
+export AGENT_READY_PI_ROLE_MODELS='{"shaping-reviewer":"company/kimi-k3","adversarial-reviewer":"company/glm-5-3","finding-adjudicator":"company/kimi-k3"}'
+pi --model company/glm-5-3
+```
+
+Use your endpoint's model IDs. To keep the setting in every new terminal and
+worktree, add the `export` line to `~/.zshrc`.
+
+The role map is strict, so a gate never quietly runs on the wrong model:
+
+- **Every role it runs must be listed.** A role left out fails with an error.
+  It does not fall back to another model.
+- **The adjudicator must not use the adversarial reviewer's model.** The
+  check ignores a `:<thinking>` suffix, so `company/glm-5-3:high` and
+  `company/glm-5-3` count as the same model.
+- **Each result records the model it used.** The tool's `details` show
+  `model` and `modelSource`, which is `role`, `agent-model`, `parent` or
+  `none`.
+
+#### One model for all reviewers
+
+To send every reviewer to one model, map the agent files' `model:` value.
+Every agent-ready reviewer declares `model: opus`:
 
 ```bash
 export AGENT_READY_PI_MODELS='{"opus":"company/<endpoint model ID>"}'
 ```
+
+`AGENT_READY_PI_ROLE_MODELS` takes priority over this when both are set.
 
 ### A host Pi already supports
 
@@ -300,7 +384,8 @@ nothing is lost by accident.
 | Variable | Effect |
 | --- | --- |
 | `AGENT_READY_PI_AGENTS_DIR` | Read `<dir>/<role>.md` instead of searching `.claude/agents/` and `.apm/agents/` |
-| `AGENT_READY_PI_MODELS` | A JSON map from an agent file's `model:` value to a Pi model pattern, such as `{"opus": "anthropic/claude-opus-5-5"}`. Without it, the child uses the parent's model |
+| `AGENT_READY_PI_ROLE_MODELS` | A JSON map from a role to a Pi model pattern. When set, it must list every role it runs, and `finding-adjudicator` must not use `adversarial-reviewer`'s model. It takes priority over `AGENT_READY_PI_MODELS` |
+| `AGENT_READY_PI_MODELS` | A JSON map from an agent file's `model:` value to a Pi model pattern, such as `{"opus": "anthropic/claude-opus-5-5"}`. Without either map, the child uses the parent's model |
 | `AGENT_READY_PI_TIMEOUT_MS` | The child timeout. The default is 1,200,000 ms (20 minutes) |
 | `AGENT_READY_PI_BIN` | The Pi command to start. By default, it reuses the running Pi |
 
