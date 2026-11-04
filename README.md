@@ -51,11 +51,37 @@ project install.
 
 ### What the project needs
 
-The project also needs agent-ready Core installed, for two reasons:
+The project also needs [agent-ready](https://github.com/eugenelim/agent-ready-repo)
+Core installed, for two reasons:
 
 - Pi reads Core's skills from `.agents/skills/`.
 - The tool reads each reviewer's definition from `.claude/agents/<role>.md`,
   then from `.apm/agents/<role>.md`. Both are under the repository root.
+
+Install Core with `agentbundle`, as agent-ready's README shows:
+
+```bash
+python -m pip install agentbundle
+agentbundle install --pack core
+```
+
+Commit the installed files, so every checkout and worktree has them.
+
+### While this repository is private
+
+Git needs your GitHub access to install it. Give git a token for that one
+command only:
+
+```bash
+GH_TOKEN="$(gh auth token)" \
+GIT_CONFIG_COUNT=2 \
+GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0= \
+GIT_CONFIG_KEY_1=credential.helper GIT_CONFIG_VALUE_1='!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f' \
+pi install git:github.com/eugenelim/agent-ready-pi@v0.1.3
+```
+
+Once the repository is public, the plain `pi install` command above works
+without a token.
 
 ## What the tool runs
 
@@ -95,11 +121,17 @@ inside a container when the repository holds code you do not trust.
 
 ## Independence
 
-A fresh `--no-session` child that loads no context files counts as the
-"genuinely fresh context" that agent-ready's shaping-review gate accepts. It
-uses the same model as the parent unless you map a model. This is the claim
-this package makes, and the repository owner has accepted it. agent-ready
-Core's gate text is unchanged.
+agent-ready's shaping-review gate accepts "a genuinely fresh context" as an
+independent reviewer. This package claims that a fresh `--no-session` child,
+which loads no session and no context files, is that fresh context.
+
+**Whether to accept the claim is your decision** for your own review gates.
+agent-ready Core's gate text does not mention this package. If you do not
+accept it, keep a human reviewer for shaping review on Pi.
+
+The child uses the parent's model unless you map another. A different model
+for the adjudicator, as recommended below, adds independence that a fresh
+process alone does not give.
 
 ## Use a hosted model
 
@@ -112,8 +144,9 @@ Two warnings before you start:
 
 - **Your code goes to the endpoint.** It receives everything a reviewer
   reads, so use one your data rules allow.
-- **GLM-5.3 has its own licence**, the GLM-5.3 License. It is not MIT, so
-  check that it covers your use.
+- **Check each model's licence.** GLM-5.3 uses the GLM-5.3 License and
+  Kimi K3 the Kimi K3 License. Neither is MIT, so check that they cover your
+  use.
 
 ### 1. Collect the endpoint details
 
@@ -251,7 +284,12 @@ model unless you map another.
 
 #### Recommended: a model per role
 
-Use GLM-5.3 where tool use matters and Kimi K3 where reasoning matters:
+Use GLM-5.3 where tool use matters and Kimi K3 where reasoning matters.
+This advice dates from November 2026. It rests mainly on Artificial
+Analysis's comparison of the two models: GLM-5.3 scored 42% on
+Terminal-Bench 4.0 against Kimi K3's 13%, and Kimi K3 scored 27% on
+HLE-Diamond against GLM-5.3's 18%. Open-weight models change quickly, so
+check newer releases before you adopt it.
 
 | Role | Model | Why |
 | --- | --- | --- |
@@ -396,6 +434,18 @@ npm install --ignore-scripts
 npm test           # node:test, with a fake pi binary and no network
 npm run typecheck  # tsc --noEmit
 ```
+
+## Versions
+
+Tags pin what `pi install …@<tag>` downloads, which is the tool and the skill
+Pi loads. A new tag is cut only when either of those changes. Documentation
+changes go straight to `main`. Read this README on GitHub for the latest
+setup advice.
+
+## Support
+
+Provided as is, without support commitments. Issues and pull requests are
+welcome.
 
 ## License
 
