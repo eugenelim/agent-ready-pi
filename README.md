@@ -105,7 +105,7 @@ Ask the endpoint's owner for these four facts:
 In your own terminal, run:
 
 ```bash
-security add-generic-password -s pi-company-llm -w
+security add-generic-password -a "$USER" -s pi-company-llm -w
 ```
 
 With nothing after `-w`, `security` asks for the key, so it never lands in
