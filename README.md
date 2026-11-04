@@ -15,11 +15,11 @@ Pi needs Node.js 22.19 or newer.
 
 ```bash
 # Personal: written to ~/.pi/agent/settings.json
-pi install git:github.com/eugenelim/agent-ready-pi@v0.1.4
+pi install git:github.com/eugenelim/agent-ready-pi@v0.1.5
 
 # One project: written to the project's .pi/settings.json.
 # Pi loads it only after you trust the project.
-pi install -l git:github.com/eugenelim/agent-ready-pi@v0.1.4
+pi install -l git:github.com/eugenelim/agent-ready-pi@v0.1.5
 
 # Try it once without saving
 pi -e /path/to/agent-ready-pi
@@ -31,12 +31,12 @@ Install the new tag. Pi replaces the old version in place, so there is
 nothing to remove:
 
 ```bash
-pi install git:github.com/eugenelim/agent-ready-pi@v0.1.4
+pi install git:github.com/eugenelim/agent-ready-pi@v0.1.5
 pi list        # shows one entry, at the new tag
 ```
 
 **Do not run `pi remove` with the old tag after upgrading.** Pi matches the
-package without its tag, so removing `@v0.1.3` removes the version you just
+package without its tag, so removing `@v0.1.4` removes the version you just
 installed. If `pi list` ever shows nothing for the package, install it again.
 
 ### Remove
@@ -303,15 +303,34 @@ GLM-5.3. Use the endpoint's real limits:
 accepts. Some Kimi K3 deployments accept only `low`, `high` and `max`, so
 Pi's default `medium` is sent as `high`.
 
-Then map each role and start Pi on GLM-5.3:
+Then map each role in the settings file, `agent-ready-pi.json` in Pi's
+configuration directory. Use your endpoint's model IDs:
 
 ```bash
-export AGENT_READY_PI_ROLE_MODELS='{"shaping-reviewer":"company/kimi-k3","adversarial-reviewer":"company/glm-5-3","finding-adjudicator":"company/kimi-k3"}'
+PI_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"; mkdir -p "$PI_DIR"
+cat > "$PI_DIR/agent-ready-pi.json" <<'EOF'
+{
+  "roleModels": {
+    "shaping-reviewer": "company/kimi-k3",
+    "adversarial-reviewer": "company/glm-5-3",
+    "finding-adjudicator": "company/kimi-k3"
+  }
+}
+EOF
 pi --model company/glm-5-3
 ```
 
-Use your endpoint's model IDs. To keep the setting in every new terminal and
-worktree, add the `export` line to `~/.zshrc`.
+The tool reads this file on every call, so an edit applies straight away,
+in every terminal and worktree, without restarting Pi.
+
+`AGENT_READY_PI_ROLE_MODELS` still works and takes priority over the file.
+It is read only when Pi starts, so a change to it needs a restart. If you set
+it in `~/.zshrc` before v0.1.5, remove that line and use the file:
+`sed -i '' '/AGENT_READY_PI_ROLE_MODELS/d' ~/.zshrc`, then open a new window.
+
+To see what the tool will use, ask Pi to call `agent_ready_review` with
+`check: true` for a role. It reports the model and where it came from, the
+review root, the agent file and the tools, without running a reviewer.
 
 The role map is strict, so a gate never quietly runs on the wrong model:
 
@@ -320,9 +339,11 @@ The role map is strict, so a gate never quietly runs on the wrong model:
 - **The adjudicator must not use the adversarial reviewer's model.** The
   check ignores a `:<thinking>` suffix, so `company/glm-5-3:high` and
   `company/glm-5-3` count as the same model.
+- **Incomplete names are refused.** A value such as `company/`, usually left
+  by an empty shell variable, fails before any child starts.
 - **Each result records the model it used.** The tool's `details` show
   `model` and `modelSource`, which is `role`, `agent-model`, `parent` or
-  `none`.
+  `none`. For a role map, `roleMapFrom` says `env` or `file`.
 
 #### If a review fails
 
@@ -332,12 +353,16 @@ stops at the gate instead of reviewing its own work.
 
 | Message | Cause and fix |
 | --- | --- |
-| `exited with code 1` with `source: parent` and `AGENT_READY_PI_ROLE_MODELS is not set` | The terminal that started Pi never loaded the role map, so the child fell back to Pi's own model. Run `source ~/.zshrc`, or open a new window, then start Pi with `--model` |
+| `exited with code 1` with `source: parent` and `No role map is set` | Neither the settings file nor `AGENT_READY_PI_ROLE_MODELS` has a role map, so the child fell back to Pi's own model. Write the settings file; the next call uses it |
 | `exited with code 1` with `No API key found` | The child's model has no key. Start Pi with `--model company/<model ID>`, or set the role map |
 | `Unsupported thinking_effort` in the error output | Add a `thinkingLevelMap` for that model, as shown above |
 | `no model for <role>` | The role map leaves out that role. Add it |
+| `incomplete model for <role>: "company/"` | The model name is missing after the provider. Fix the value |
+| The review reads old files, or files are missing | Pi was started in a different worktree from the work. Exit, `cd` to the worktree that holds the work, and run `pi --continue` |
 
-To rule out the package, run one child by hand from the repository root:
+To rule out the package, run one child by hand from the repository root.
+This check is for people diagnosing setup. Its output is not a review result,
+so never use it as a substitute for the tool at a gate:
 
 ```bash
 echo "Reply with OK." > /tmp/pi-child-packet.md
@@ -358,7 +383,7 @@ Every agent-ready reviewer declares `model: opus`:
 export AGENT_READY_PI_MODELS='{"opus":"company/<endpoint model ID>"}'
 ```
 
-`AGENT_READY_PI_ROLE_MODELS` takes priority over this when both are set.
+A role map, from the settings file or `AGENT_READY_PI_ROLE_MODELS`, takes priority over this.
 
 ### A host Pi already supports
 
@@ -462,6 +487,9 @@ pi --model company/<endpoint model ID>
 The worktree sits beside the repository, for example `myrepo-my-change`
 next to `myrepo`. It starts from the latest remote default branch.
 
+- **Start Pi inside the worktree that holds the work.** Reviewers read files
+  at the git root of the folder Pi was started in. A session started in the
+  main checkout reviews the main checkout's files, not the worktree's.
 - **Uncommitted changes stay behind.** A new worktree has only committed work.
 - **Setup is shared.** The package install, `models.json` and the keychain
   key are per user, so a worktree needs no setup of its own.
@@ -489,7 +517,8 @@ nothing is lost by accident.
 | Variable | Effect |
 | --- | --- |
 | `AGENT_READY_PI_AGENTS_DIR` | Read `<dir>/<role>.md` instead of searching `.claude/agents/` and `.apm/agents/` |
-| `AGENT_READY_PI_ROLE_MODELS` | A JSON map from a role to a Pi model pattern. When set, it must list every role it runs, and `finding-adjudicator` must not use `adversarial-reviewer`'s model. It takes priority over `AGENT_READY_PI_MODELS` |
+| `AGENT_READY_PI_CONFIG` | The settings file to read. The default is `agent-ready-pi.json` in Pi's configuration directory. The file holds `roleModels`, a role map with the same rules as below, and is read on every call |
+| `AGENT_READY_PI_ROLE_MODELS` | A JSON map from a role to a Pi model pattern. It takes priority over the settings file, and is read when Pi starts. When set, it must list every role it runs, and `finding-adjudicator` must not use `adversarial-reviewer`'s model. It takes priority over `AGENT_READY_PI_MODELS` |
 | `AGENT_READY_PI_MODELS` | A JSON map from an agent file's `model:` value to a Pi model pattern, such as `{"opus": "anthropic/claude-opus-5-5"}`. Without either map, the child uses the parent's model |
 | `AGENT_READY_PI_TIMEOUT_MS` | The child timeout. The default is 1,200,000 ms (20 minutes) |
 | `AGENT_READY_PI_BIN` | The Pi command to start. By default, it reuses the running Pi |
