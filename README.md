@@ -75,6 +75,91 @@ uses the same model as the parent unless you map a model. This is the claim
 this package makes, and the repository owner has accepted it. agent-ready
 Core's gate text is unchanged.
 
+## Use a hosted model
+
+Reviewers can run on any model Pi can reach, including open-weight models
+such as GLM-5.3 served by a hosting company. The reviewer child gets the same
+environment and Pi configuration directory as the parent, so you only set the
+model up once.
+
+Two warnings before you choose:
+
+- **Your code goes to the host.** The host receives everything a reviewer
+  reads, so pick one your data rules allow.
+- **Check the model's licence.** Some open-weight models use their own
+  licence, not MIT or Apache.
+
+### 1. Keep the API key in the macOS keychain
+
+In your own terminal, run:
+
+```bash
+security add-generic-password -s pi-<host> -w
+```
+
+With nothing after `-w`, `security` asks for the key, so it never lands in
+shell history. Pi only stores a command that reads the key, never the key
+itself. The first time Pi reads the key, macOS may ask you to allow it.
+
+### 2a. A host Pi already supports
+
+Fireworks, Together AI, OpenRouter, Z.ai, Moonshot, Hugging Face and the
+other providers in Pi's `docs/providers.md` come with their endpoints built
+in. You need only the key and a model ID in the form `<provider>/<id>`:
+
+```bash
+export FIREWORKS_API_KEY="$(security find-generic-password -s pi-fireworks -w)"
+pi --list-models glm        # confirm the exact model ID
+pi --model fireworks/<model-id>
+```
+
+Use the variable that matches your host, such as `TOGETHER_API_KEY`,
+`OPENROUTER_API_KEY` or `ZAI_API_KEY`. The key then sits in that shell's
+environment until you close it.
+
+### 2b. Any other host
+
+For a company gateway, vLLM, SGLang, LM Studio or Ollama, add the endpoint to
+`models.json` in Pi's configuration directory. By default that is
+`~/.pi/agent/`; `PI_CODING_AGENT_DIR` changes it. A leading `!` makes Pi run
+the command on each request, so the key is not written to the file:
+
+```json
+{
+  "$schema": "https://pi.dev/schemas/models.schema.json",
+  "providers": {
+    "myhost": {
+      "baseUrl": "https://<host>/v1",
+      "api": "openai-completions",
+      "apiKey": "!security find-generic-password -s pi-myhost -w",
+      "models": [{ "id": "<model-id>" }]
+    }
+  }
+}
+```
+
+Then run `pi --model myhost/<model-id>`. Use `"api": "openai-completions"`
+for an OpenAI-compatible server. For any other API, see Pi's
+`docs/models.md`.
+
+### 3. Choose the reviewer model
+
+With no mapping, every reviewer child uses the parent's model. To give
+reviewers a different model, map the agent file's `model:` value. Every
+agent-ready reviewer declares `model: opus`:
+
+```bash
+export AGENT_READY_PI_MODELS='{"opus":"fireworks/<model-id>"}'
+```
+
+### 4. Remove it afterwards
+
+```bash
+security delete-generic-password -s pi-<host>
+```
+
+Then revoke the key in the host's console.
+
 ## Configuration
 
 | Variable | Effect |
