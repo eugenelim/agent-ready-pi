@@ -9,7 +9,7 @@ import { basename } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { type ExecFn, runReview } from "../src/child.ts";
+import { type ExecFn, type ReviewResult, runReview } from "../src/child.ts";
 import { ROLES, ReviewConfigError, parseRole } from "../src/roles.ts";
 
 /**
@@ -27,6 +27,26 @@ function piInvocation(): { command: string; args: string[] } {
 		return { command: process.execPath, args: [] };
 	}
 	return { command: "pi", args: [] };
+}
+
+/** Most lines of the child's error output to quote in a failure message. */
+const STDERR_TAIL_LINES = 12;
+
+/**
+ * Explain a failed review: the cause, the model the child ran on and where
+ * that choice came from, and the end of the child's own error output.
+ */
+export function failureText(details: ReviewResult["details"]): string {
+	const lines = [
+		`agent_ready_review failed: ${details.error}. The reviewer is missing; this is not a clean review.`,
+		`Model: ${details.model ?? "none"} (source: ${details.modelSource}).`,
+	];
+	if (details.modelSource !== "role") {
+		lines.push("AGENT_READY_PI_ROLE_MODELS is not set, so the child did not use a per-role model.");
+	}
+	const tail = details.stderr.trim().split("\n").slice(-STDERR_TAIL_LINES).join("\n");
+	if (tail) lines.push("Child error output (last lines):", tail);
+	return lines.join("\n");
 }
 
 export default function (pi: ExtensionAPI): void {
@@ -58,9 +78,7 @@ export default function (pi: ExtensionAPI): void {
 					parentModel: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
 					signal,
 				});
-				const text = result.ok
-					? result.report
-					: `agent_ready_review failed: ${result.details.error}. The reviewer is missing; this is not a clean review.`;
+				const text = result.ok ? result.report : failureText(result.details);
 				return { content: [{ type: "text", text }], details: result.details, isError: !result.ok };
 			} catch (error) {
 				if (!(error instanceof ReviewConfigError)) throw error;

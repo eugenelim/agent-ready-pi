@@ -63,6 +63,37 @@ describe("agent_ready_review tool", () => {
 		assert.match(result.content[0]!.text, /not a clean review/);
 	});
 
+	it("quotes the child's error output, the model and its source in a failure", async () => {
+		const stderr = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n") + "\nNo API key found for the selected model.\n";
+		const { tool } = load({ stdout: "", stderr, code: 1 });
+		const result = await tool.execute("id", { role: "adversarial-reviewer", packet: "p" }, undefined, undefined, ctx);
+		const text = result.content[0]!.text;
+		assert.equal(result.isError, true);
+		assert.match(text, /exited with code 1/);
+		assert.match(text, /Model: anthropic\/parent \(source: parent\)/);
+		assert.match(text, /AGENT_READY_PI_ROLE_MODELS is not set/);
+		assert.match(text, /No API key found for the selected model\./);
+		assert.doesNotMatch(text, /line 9\n/);
+	});
+
+	it("does not flag a missing role map when the role map chose the model", async () => {
+		process.env.AGENT_READY_PI_ROLE_MODELS = JSON.stringify({
+			"shaping-reviewer": "company/kimi-k3",
+			"adversarial-reviewer": "company/glm-5-3",
+			"finding-adjudicator": "company/kimi-k3",
+		});
+		try {
+			const { tool } = load({ stdout: "", stderr: "boom", code: 1 });
+			const result = await tool.execute("id", { role: "shaping-reviewer", packet: "p" }, undefined, undefined, ctx);
+			const text = result.content[0]!.text;
+			assert.match(text, /Model: company\/kimi-k3 \(source: role\)/);
+			assert.doesNotMatch(text, /is not set/);
+			assert.match(text, /boom/);
+		} finally {
+			delete process.env.AGENT_READY_PI_ROLE_MODELS;
+		}
+	});
+
 	it("marks an unknown role as an error without starting a child", async () => {
 		const { tool, calls } = load({ stdout: "ok", stderr: "", code: 0 });
 		const result = await tool.execute("id", { role: "implementer", packet: "p" }, undefined, undefined, ctx);
