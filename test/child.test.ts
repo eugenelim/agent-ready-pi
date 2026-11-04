@@ -111,6 +111,17 @@ describe("child argv per role", () => {
 		assert.equal(realpathSync(captured!.cwd), realpathSync(findProjectRoot(repo)));
 	});
 
+	it("treats a git worktree's .git file as the project root", async () => {
+		const repo = fixtureRepo("repo");
+		rmSync(join(repo, ".git"), { recursive: true });
+		writeFileSync(join(repo, ".git"), "gitdir: /elsewhere/.git/worktrees/example\n");
+		const nested = join(repo, "src", "deep");
+		mkdirSync(nested, { recursive: true });
+		assert.equal(findProjectRoot(nested), repo);
+		const { result } = await review("shaping-reviewer", repo);
+		assert.equal(result.ok, true);
+	});
+
 	it("omits --model when there is no parent model and no mapping", async () => {
 		const repo = fixtureRepo("repo");
 		const { captured } = await review("finding-adjudicator", repo);

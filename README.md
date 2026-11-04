@@ -250,6 +250,51 @@ security delete-generic-password -s pi-company-llm
 Delete the `company` entry from `models.json`, then revoke the key with the
 endpoint's owner.
 
+## Work in several sessions at once
+
+Give each Pi session its own git worktree: a second checkout of the same
+repository, in its own folder and on its own branch. Sessions then never edit
+each other's files.
+
+Run this from anywhere inside the repository. Change `TOPIC` for each
+session:
+
+```bash
+TOPIC=my-change                                   # a short branch name for this session
+BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD || echo origin/main)
+ROOT=$(git rev-parse --show-toplevel)
+WT="$(dirname "$ROOT")/$(basename "$ROOT")-$TOPIC"
+git fetch origin
+git worktree add -b "$TOPIC" "$WT" "$BASE"
+cd "$WT"
+pi --model company/<endpoint model ID>
+```
+
+The worktree sits beside the repository, for example `myrepo-my-change`
+next to `myrepo`. It starts from the latest remote default branch.
+
+- **Uncommitted changes stay behind.** A new worktree has only committed work.
+- **Setup is shared.** The package install, `models.json` and the keychain
+  key are per user, so a worktree needs no setup of its own.
+- **Trust is per folder.** Pi may ask whether to trust the new folder. Give
+  the same answer you gave for the main checkout.
+- **Reviewer files must be committed.** The tool reads `.claude/agents/` or
+  `.apm/agents/` inside the worktree. Check with
+  `ls .claude/agents .apm/agents`. If they are missing because they are not
+  committed, point the tool at the main checkout:
+  `export AGENT_READY_PI_AGENTS_DIR="$ROOT/.claude/agents"`.
+
+See the open worktrees, and remove one once its branch is merged:
+
+```bash
+git worktree list
+git worktree remove "$WT"
+git branch -d "$TOPIC"
+```
+
+`git worktree remove` refuses while the worktree has uncommitted changes, so
+nothing is lost by accident.
+
 ## Configuration
 
 | Variable | Effect |
