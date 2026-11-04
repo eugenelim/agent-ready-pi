@@ -15,11 +15,11 @@ Pi needs Node.js 22.19 or newer.
 
 ```bash
 # Personal: written to ~/.pi/agent/settings.json
-pi install git:github.com/eugenelim/agent-ready-pi@v0.1.0
+pi install git:github.com/eugenelim/agent-ready-pi@v0.1.1
 
 # One project: written to the project's .pi/settings.json.
 # Pi loads it only after you trust the project.
-pi install -l git:github.com/eugenelim/agent-ready-pi@v0.1.0
+pi install -l git:github.com/eugenelim/agent-ready-pi@v0.1.1
 
 # Try it once without saving
 pi -e /path/to/agent-ready-pi
