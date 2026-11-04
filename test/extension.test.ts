@@ -9,6 +9,8 @@ import extension from "../extensions/review.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = mkdtempSync(join(tmpdir(), "agent-ready-pi-ext-"));
+// Never read the developer's real settings file.
+process.env.AGENT_READY_PI_CONFIG = join(repo, "no-settings.json");
 cpSync(join(here, "fixtures", "repo"), repo, { recursive: true });
 mkdirSync(join(repo, ".git"));
 after(() => rmSync(repo, { recursive: true, force: true }));
@@ -71,7 +73,7 @@ describe("agent_ready_review tool", () => {
 		assert.equal(result.isError, true);
 		assert.match(text, /exited with code 1/);
 		assert.match(text, /Model: anthropic\/parent \(source: parent\)/);
-		assert.match(text, /AGENT_READY_PI_ROLE_MODELS is not set/);
+		assert.match(text, /No role map is set/);
 		assert.match(text, /No API key found for the selected model\./);
 		assert.doesNotMatch(text, /line 9\n/);
 	});
@@ -92,6 +94,39 @@ describe("agent_ready_review tool", () => {
 		} finally {
 			delete process.env.AGENT_READY_PI_ROLE_MODELS;
 		}
+	});
+
+	it("check: true reports the plan without starting a child", async () => {
+		const { tool, calls } = load({ stdout: "ok", stderr: "", code: 0 });
+		const result = await tool.execute("id", { role: "finding-adjudicator", check: true }, undefined, undefined, ctx);
+		const text = result.content[0]!.text;
+		assert.equal(result.isError, false);
+		assert.equal(calls.length, 0);
+		assert.match(text, /check for finding-adjudicator: ready\. No reviewer was run\./);
+		assert.match(text, /Model: anthropic\/parent \(source: parent\)/);
+		assert.match(text, /Review root: /);
+		assert.match(text, /Tools: read,grep\./);
+		assert.equal("agentBody" in result.details, false);
+	});
+
+	it("check: true reports a configuration problem as an error", async () => {
+		process.env.AGENT_READY_PI_ROLE_MODELS = '{"shaping-reviewer":"company/"}';
+		try {
+			const { tool } = load({ stdout: "", stderr: "", code: 0 });
+			const result = await tool.execute("id", { role: "shaping-reviewer", check: true }, undefined, undefined, ctx);
+			assert.equal(result.isError, true);
+			assert.match(result.content[0]!.text, /incomplete model/);
+		} finally {
+			delete process.env.AGENT_READY_PI_ROLE_MODELS;
+		}
+	});
+
+	it("requires a packet unless check is true", async () => {
+		const { tool, calls } = load({ stdout: "ok", stderr: "", code: 0 });
+		const result = await tool.execute("id", { role: "shaping-reviewer" }, undefined, undefined, ctx);
+		assert.equal(result.isError, true);
+		assert.match(result.content[0]!.text, /packet is required/);
+		assert.equal(calls.length, 0);
 	});
 
 	it("marks an unknown role as an error without starting a child", async () => {

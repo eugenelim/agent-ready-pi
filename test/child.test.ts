@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { type ExecFn, findProjectRoot, runReview } from "../src/child.ts";
+import { type ExecFn, configFilePath, findProjectRoot, planReview, runReview } from "../src/child.ts";
 import { FORBIDDEN_TOOLS, ROLES, ReviewConfigError, parseAgentFile, parseRole, toPiAllowlist } from "../src/roles.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -54,7 +54,8 @@ async function review(
 	extra: { parentModel?: string; signal?: AbortSignal } = {},
 ) {
 	const capture = join(repo, "capture.json");
-	const childEnv = { FAKE_PI_CAPTURE: capture, ...env };
+	// Point the settings file inside the fixture, so the developer's real one is never read.
+	const childEnv = { FAKE_PI_CAPTURE: capture, AGENT_READY_PI_CONFIG: join(repo, "agent-ready-pi.json"), ...env };
 	const result = await runReview({
 		role: parseRole(role),
 		packet: `packet for ${role}`,
@@ -211,6 +212,93 @@ describe("per-role models", () => {
 		for (const [value, pattern] of cases) {
 			await assert.rejects(review("shaping-reviewer", fixtureRepo("repo"), { AGENT_READY_PI_ROLE_MODELS: value }), pattern);
 		}
+	});
+});
+
+describe("settings file role map", () => {
+	const fileMap = {
+		roleModels: {
+			"shaping-reviewer": "company/kimi-k3",
+			"adversarial-reviewer": "company/glm-5-3",
+			"finding-adjudicator": "company/kimi-k3",
+		},
+	};
+
+	it("is read when the environment has no role map", async () => {
+		const repo = fixtureRepo("repo");
+		writeFileSync(join(repo, "agent-ready-pi.json"), JSON.stringify(fileMap));
+		const { result } = await review("shaping-reviewer", repo, {}, { parentModel: "company/parent" });
+		assert.equal(result.details.model, "company/kimi-k3");
+		assert.equal(result.details.modelSource, "role");
+		assert.equal(result.details.roleMapFrom, "file");
+	});
+
+	it("applies an edit on the next call, without a restart", async () => {
+		const repo = fixtureRepo("repo");
+		const file = join(repo, "agent-ready-pi.json");
+		writeFileSync(file, JSON.stringify({ roleModels: { ...fileMap.roleModels, "shaping-reviewer": "company/" } }));
+		await assert.rejects(review("shaping-reviewer", repo), /incomplete model/);
+		writeFileSync(file, JSON.stringify(fileMap));
+		const { result } = await review("shaping-reviewer", repo);
+		assert.equal(result.details.model, "company/kimi-k3");
+	});
+
+	it("loses to AGENT_READY_PI_ROLE_MODELS", async () => {
+		const repo = fixtureRepo("repo");
+		writeFileSync(join(repo, "agent-ready-pi.json"), JSON.stringify(fileMap));
+		const env = JSON.stringify({ ...fileMap.roleModels, "shaping-reviewer": "company/from-env" });
+		const { result } = await review("shaping-reviewer", repo, { AGENT_READY_PI_ROLE_MODELS: env });
+		assert.equal(result.details.model, "company/from-env");
+		assert.equal(result.details.roleMapFrom, "env");
+	});
+
+	it("keeps the same strict rules as the environment map", async () => {
+		const repo = fixtureRepo("repo");
+		const file = join(repo, "agent-ready-pi.json");
+		const cases: [unknown, RegExp][] = [
+			[{ roleModels: { "adversarial-reviewer": "company/glm-5-3" } }, /no model for shaping-reviewer/],
+			[{ roleModels: { ...fileMap.roleModels, "finding-adjudicator": "company/glm-5-3:max" } }, /must not use/],
+			[{ roleModels: fileMap.roleModels, extra: 1 }, /unknown key extra/],
+			[[1], /must be a JSON object/],
+		];
+		for (const [content, pattern] of cases) {
+			writeFileSync(file, JSON.stringify(content));
+			const role = (content as { roleModels?: Record<string, string> }).roleModels?.["finding-adjudicator"] === "company/glm-5-3:max"
+				? "finding-adjudicator"
+				: "shaping-reviewer";
+			await assert.rejects(review(role, repo), pattern);
+		}
+		writeFileSync(file, "{");
+		await assert.rejects(review("shaping-reviewer", repo), /not valid JSON/);
+	});
+
+	it("rejects a symlinked settings file", async () => {
+		const repo = fixtureRepo("repo");
+		const real = join(repo, "real.json");
+		writeFileSync(real, JSON.stringify(fileMap));
+		symlinkSync(real, join(repo, "agent-ready-pi.json"));
+		await assert.rejects(review("shaping-reviewer", repo), /not a regular file/);
+	});
+
+	it("defaults to agent-ready-pi.json in PI_CODING_AGENT_DIR", () => {
+		assert.equal(configFilePath({ PI_CODING_AGENT_DIR: "/tmp/pi-agent" }), "/tmp/pi-agent/agent-ready-pi.json");
+	});
+});
+
+describe("planReview", () => {
+	it("resolves the model, root, agent file and tools without running anything", () => {
+		const repo = fixtureRepo("repo");
+		const plan = planReview({
+			role: "adversarial-reviewer",
+			cwd: repo,
+			parentModel: "company/parent",
+			env: { AGENT_READY_PI_CONFIG: join(repo, "none.json") },
+		});
+		assert.equal(plan.model, "company/parent");
+		assert.equal(plan.modelSource, "parent");
+		assert.equal(plan.root, repo);
+		assert.equal(plan.allowlist.join(","), "read,grep,find,ls,bash");
+		assert.match(plan.agentFile, /adversarial-reviewer\.md$/);
 	});
 });
 

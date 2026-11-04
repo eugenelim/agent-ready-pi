@@ -4,13 +4,16 @@
  */
 
 import { lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import { ROLES, type Role, ReviewConfigError, parseAgentFile, toPiAllowlist } from "./roles.ts";
 
 /** Largest agent file this package will read. */
 const MAX_AGENT_FILE_BYTES = 1024 * 1024;
+
+/** Largest settings file this package will read. */
+const MAX_CONFIG_FILE_BYTES = 64 * 1024;
 
 /** Default child timeout: 20 minutes. */
 export const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
@@ -26,6 +29,7 @@ export type ExecFn = (
 export interface ReviewRequest {
 	role: Role;
 	packet: string;
+	/** The session's working directory; the review runs at its git root. */
 	cwd: string;
 	/** How to start Pi: the command plus any leading arguments. */
 	pi: { command: string; args: string[] };
@@ -46,6 +50,8 @@ export interface ReviewResult {
 		allowlist: string[];
 		model: string | undefined;
 		modelSource: ModelSource;
+		roleMapFrom?: RoleMapOrigin;
+		root: string;
 		exitCode: number;
 		killed: boolean;
 		stderr: string;
@@ -100,6 +106,11 @@ function parseStringMap(name: string, raw: string): Record<string, string> {
 	} catch {
 		throw new ReviewConfigError(`${name} is not valid JSON`);
 	}
+	return checkStringMap(name, parsed);
+}
+
+/** Check that `parsed` is an object of complete model references, or throw. */
+function checkStringMap(name: string, parsed: unknown): Record<string, string> {
 	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
 		throw new ReviewConfigError(`${name} must be a JSON object`);
 	}
@@ -122,13 +133,73 @@ function baseModel(model: string): string {
 	return colon === -1 ? model : model.slice(0, colon);
 }
 
+/** Where a role map was read from. */
+export type RoleMapOrigin = "env" | "file";
+
+/**
+ * The settings file: `AGENT_READY_PI_CONFIG`, else `agent-ready-pi.json` in
+ * Pi's configuration directory (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`).
+ */
+export function configFilePath(env: ReviewRequest["env"] = process.env): string {
+	if (env?.AGENT_READY_PI_CONFIG) return resolve(env.AGENT_READY_PI_CONFIG);
+	const agentDir = env?.PI_CODING_AGENT_DIR ? resolve(env.PI_CODING_AGENT_DIR) : join(homedir(), ".pi", "agent");
+	return join(agentDir, "agent-ready-pi.json");
+}
+
+/**
+ * Read `roleModels` from the settings file, fresh on every call so an edit
+ * applies without restarting Pi. A missing file means no role map; anything
+ * else unexpected fails closed.
+ */
+function readRoleMapFile(path: string): Record<string, string> | undefined {
+	let stat;
+	try {
+		stat = lstatSync(path);
+	} catch {
+		return undefined;
+	}
+	if (!stat.isFile()) throw new ReviewConfigError(`settings file is not a regular file: ${path}`);
+	if (stat.size > MAX_CONFIG_FILE_BYTES) throw new ReviewConfigError(`settings file is too large: ${path}`);
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(readFileSync(path, "utf8"));
+	} catch {
+		throw new ReviewConfigError(`settings file is not valid JSON: ${path}`);
+	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new ReviewConfigError(`settings file must be a JSON object: ${path}`);
+	}
+	for (const key of Object.keys(parsed)) {
+		if (key !== "roleModels") throw new ReviewConfigError(`settings file has an unknown key ${key}: ${path}`);
+	}
+	const roleModels = (parsed as { roleModels?: unknown }).roleModels;
+	return roleModels === undefined ? undefined : checkStringMap(`roleModels in ${path}`, roleModels);
+}
+
+/** Apply a role map's rules for one role, or throw. */
+function modelFromRoleMap(name: string, roleMap: Record<string, string>, role: Role): string {
+	for (const key of Object.keys(roleMap)) {
+		if (!(ROLES as readonly string[]).includes(key)) {
+			throw new ReviewConfigError(`${name} names an unknown role: ${key}`);
+		}
+	}
+	const model = roleMap[role];
+	if (!model) throw new ReviewConfigError(`${name} has no model for ${role}`);
+	const reviewer = roleMap["adversarial-reviewer"];
+	if (role === "finding-adjudicator" && reviewer && baseModel(reviewer) === baseModel(model)) {
+		throw new ReviewConfigError(`finding-adjudicator must not use the adversarial-reviewer's model in ${name}`);
+	}
+	return model;
+}
+
 /**
  * Pick the child's model, most specific first:
  *
- * 1. `AGENT_READY_PI_ROLE_MODELS`, a JSON object keyed by role. When it is set,
- *    it must name every role it is used for: a missing role fails closed
- *    instead of falling back, and the adjudicator may not share the
- *    adversarial reviewer's model, so it never judges its own family's findings.
+ * 1. A role map: `AGENT_READY_PI_ROLE_MODELS`, else `roleModels` in the
+ *    settings file. It must name every role it is used for: a missing role
+ *    fails closed instead of falling back, and the adjudicator may not share
+ *    the adversarial reviewer's model, so it never judges its own family's
+ *    findings.
  * 2. `AGENT_READY_PI_MODELS`, a JSON object keyed by the agent file's `model:`
  *    value (for example `opus`).
  * 3. The parent's model.
@@ -138,24 +209,16 @@ export function resolveModel(
 	agentModel: string | undefined,
 	parentModel: string | undefined,
 	env: ReviewRequest["env"] = process.env,
-): { model: string | undefined; source: ModelSource } {
+): { model: string | undefined; source: ModelSource; roleMapFrom?: RoleMapOrigin } {
 	const roleRaw = env?.AGENT_READY_PI_ROLE_MODELS;
 	if (roleRaw) {
 		const roleMap = parseStringMap("AGENT_READY_PI_ROLE_MODELS", roleRaw);
-		for (const key of Object.keys(roleMap)) {
-			if (!(ROLES as readonly string[]).includes(key)) {
-				throw new ReviewConfigError(`AGENT_READY_PI_ROLE_MODELS names an unknown role: ${key}`);
-			}
-		}
-		const model = roleMap[role];
-		if (!model) throw new ReviewConfigError(`AGENT_READY_PI_ROLE_MODELS has no model for ${role}`);
-		const reviewer = roleMap["adversarial-reviewer"];
-		if (role === "finding-adjudicator" && reviewer && baseModel(reviewer) === baseModel(model)) {
-			throw new ReviewConfigError(
-				"finding-adjudicator must not use the adversarial-reviewer's model in AGENT_READY_PI_ROLE_MODELS",
-			);
-		}
-		return { model, source: "role" };
+		return { model: modelFromRoleMap("AGENT_READY_PI_ROLE_MODELS", roleMap, role), source: "role", roleMapFrom: "env" };
+	}
+	const path = configFilePath(env);
+	const fileMap = readRoleMapFile(path);
+	if (fileMap) {
+		return { model: modelFromRoleMap(`roleModels in ${path}`, fileMap, role), source: "role", roleMapFrom: "file" };
 	}
 	const raw = env?.AGENT_READY_PI_MODELS;
 	if (raw && agentModel) {
@@ -194,6 +257,43 @@ function timeoutMs(env: ReviewRequest["env"]): number {
 	return Number.isFinite(value) && value > 0 ? value : DEFAULT_TIMEOUT_MS;
 }
 
+/** What a review would run, resolved without starting a child. */
+export interface ReviewPlan {
+	role: Role;
+	/** The git root the child runs in; its reads resolve here. */
+	root: string;
+	agentFile: string;
+	allowlist: string[];
+	model: string | undefined;
+	modelSource: ModelSource;
+	roleMapFrom?: RoleMapOrigin;
+	/** The settings file that was consulted for a role map. */
+	configFile: string;
+	agentBody: string;
+}
+
+/** Resolve everything a review needs. Configuration problems throw `ReviewConfigError`. */
+export function planReview(request: Omit<ReviewRequest, "packet" | "pi" | "exec" | "signal">): ReviewPlan {
+	const env = request.env ?? process.env;
+	const agentFile = findAgentFile(request.role, request.cwd, env);
+	const agent = parseAgentFile(readFileSync(agentFile, "utf8"));
+	if (agent.name !== request.role) {
+		throw new ReviewConfigError(`agent file ${agentFile} names ${agent.name}, not ${request.role}`);
+	}
+	const resolved = resolveModel(request.role, agent.model, request.parentModel, env);
+	return {
+		role: request.role,
+		root: findProjectRoot(request.cwd),
+		agentFile,
+		allowlist: toPiAllowlist(agent.tools),
+		model: resolved.model,
+		modelSource: resolved.source,
+		...(resolved.roleMapFrom ? { roleMapFrom: resolved.roleMapFrom } : {}),
+		configFile: configFilePath(env),
+		agentBody: agent.body,
+	};
+}
+
 /**
  * Run one review. Configuration problems throw `ReviewConfigError`; a child
  * that fails, is killed or prints nothing returns `ok: false`, never a clean
@@ -201,25 +301,20 @@ function timeoutMs(env: ReviewRequest["env"]): number {
  */
 export async function runReview(request: ReviewRequest): Promise<ReviewResult> {
 	const env = request.env ?? process.env;
-	const agentFile = findAgentFile(request.role, request.cwd, env);
-	const agent = parseAgentFile(readFileSync(agentFile, "utf8"));
-	if (agent.name !== request.role) {
-		throw new ReviewConfigError(`agent file ${agentFile} names ${agent.name}, not ${request.role}`);
-	}
-	const allowlist = toPiAllowlist(agent.tools);
-	const { model, source: modelSource } = resolveModel(request.role, agent.model, request.parentModel, env);
+	const plan = planReview(request);
+	const { agentFile, allowlist, model, modelSource } = plan;
 
 	const scratch = mkdtempSync(join(tmpdir(), "agent-ready-pi-"));
 	try {
 		const systemPromptFile = join(scratch, "system-prompt.md");
 		const packetFile = join(scratch, "packet.md");
-		writeFileSync(systemPromptFile, agent.body, { mode: 0o600 });
+		writeFileSync(systemPromptFile, plan.agentBody, { mode: 0o600 });
 		writeFileSync(packetFile, request.packet, { mode: 0o600 });
 		const args = [...request.pi.args, ...buildChildArgs({ allowlist, systemPromptFile, packetFile, model })];
 		const result = await request.exec(request.pi.command, args, {
 			signal: request.signal,
 			timeout: timeoutMs(env),
-			cwd: findProjectRoot(request.cwd),
+			cwd: plan.root,
 		});
 		const report = result.stdout.trim();
 		const killed = result.killed === true;
@@ -236,6 +331,8 @@ export async function runReview(request: ReviewRequest): Promise<ReviewResult> {
 				allowlist,
 				model,
 				modelSource,
+				...(plan.roleMapFrom ? { roleMapFrom: plan.roleMapFrom } : {}),
+				root: plan.root,
 				exitCode: result.code,
 				killed,
 				stderr: result.stderr.slice(-4000),
