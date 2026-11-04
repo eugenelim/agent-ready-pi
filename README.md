@@ -94,7 +94,9 @@ Two warnings before you start:
 Ask the endpoint's owner for these four facts:
 
 - **Base URL**, for example `https://llm.example.internal/v1`.
-- **Model ID**, as the endpoint names GLM-5.3. Pi sends this exact string.
+- **Model ID**, as the endpoint names GLM-5.3. Pi sends this exact string,
+  and endpoints differ: one may call it `glm-5-3`, another `glm-5.3`. Step 4
+  shows how to list the names your key can use.
 - **Key header**: the standard `Authorization: Bearer <key>`, or a header of
   the endpoint's own, such as `api-key`. This is the header's name, never the
   key itself.
@@ -154,9 +156,14 @@ Pi reads `models.json` from its configuration directory. By default that is
 
 - **The key is never stored.** The leading `!` makes Pi run the keychain
   command on each request.
-- **Set `contextWindow` and `maxTokens` to the endpoint's limits.** GLM-5.3
-  supports about 1M tokens of context, but an endpoint may allow less.
-  Without `contextWindow`, Pi assumes 128,000 tokens.
+- **Set `contextWindow` and `maxTokens` to the endpoint's limits.** Both are
+  optional, but Pi does not ask a custom endpoint for its limits. A blank
+  field gets Pi's own default, not the endpoint's:
+  - Without `contextWindow`, Pi assumes 128,000 tokens and compacts long
+    sessions early. GLM-5.3 supports about 1M tokens, but an endpoint may
+    allow less.
+  - Without `maxTokens`, Pi assumes 16,384 tokens when it sizes the thinking
+    budget.
 - **`reasoning: true`** lets Pi request GLM-5.3's thinking mode. Set it to
   `false` if the endpoint does not expose thinking.
 - **For a key header of the endpoint's own**, keep a placeholder `apiKey`,
@@ -182,6 +189,25 @@ should print `OK`. If it fails:
 | --- | --- |
 | `Failed to resolve API key … from shell command` | The keychain command failed. Run the step 2 check. `exit 44` means no item is stored: add it with `-a "$USER"`. A prompt means you need to click **Always Allow** |
 | `Failed to resolve provider "company" header "<value>"` | Reading the key for that header failed. If `<value>` is your key, the key went in as the header's name: see below |
+| `404 status code (no body)` | The base URL is wrong. Pi sends requests to `<baseUrl>/chat/completions`, so the base URL ends at the API root, often `/v1` |
+| The endpoint redirects to `/login` | The URL is the browser app, or the endpoint did not recognise the key. Find the API path and key header with the check below |
+| `403` with `key_model_access_denied` | The model name is wrong, or your key may not use it. List the names your key can use with the check below |
+| `Model "<id>" not found for provider "company". Using custom model id.` | The request reached the endpoint, but `models.json` has a different ID. Pi then ignores your limits. Make the `id` match |
+
+To list the models your key can use, run this check. It prints only model
+names and status codes; the key goes to `curl` through a pipe, never on
+screen or in the process list:
+
+```bash
+LLM_BASE_URL="https://llm.example.internal/v1"   # the baseUrl from models.json
+LLM_KEY_HEADER=""                                # empty for Bearer, or e.g. "api-key"
+H="${LLM_KEY_HEADER:-Authorization}"; P=$([ -z "$LLM_KEY_HEADER" ] && echo "Bearer ")
+security find-generic-password -s pi-company-llm -w | sed "s/^/$H: $P/" \
+  | curl -sS -H @- -w "\nHTTP %{http_code}\n" "$LLM_BASE_URL/models"
+```
+
+A `200` with a model list means the base URL and key header are right. A `307`
+or a redirect to `/login` means one of them is wrong.
 
 **If your key ended up in `models.json`**, for example as a header name:
 
