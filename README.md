@@ -96,7 +96,8 @@ Ask the endpoint's owner for these four facts:
 - **Base URL**, for example `https://llm.example.internal/v1`.
 - **Model ID**, as the endpoint names GLM-5.3. Pi sends this exact string.
 - **Key header**: the standard `Authorization: Bearer <key>`, or a header of
-  the endpoint's own, such as `api-key`.
+  the endpoint's own, such as `api-key`. This is the header's name, never the
+  key itself.
 - **Limits**: the context window and the maximum output tokens the endpoint
   allows.
 
@@ -108,9 +109,20 @@ In your own terminal, run:
 security add-generic-password -a "$USER" -s pi-company-llm -w
 ```
 
-With nothing after `-w`, `security` asks for the key, so it never lands in
-shell history. The first time Pi reads the key, macOS may ask you to allow
-it.
+With nothing after `-w`, `security` asks for the key twice, so it never
+lands in shell history. macOS requires the account name (`-a`); `$USER`, your
+macOS username, is enough. To replace a stored key, run
+`security delete-generic-password -s pi-company-llm` first.
+
+Check the key without printing it:
+
+```bash
+k="$(security find-generic-password -s pi-company-llm -w)"; echo "exit $? · key length ${#k}"; unset k
+```
+
+You should see `exit 0` and a length above 0. If macOS asks whether
+`security` may use the keychain, click **Always Allow**. Pi gives up on a key
+command that waits too long, so the prompt must not appear during a Pi run.
 
 ### 3. Add the endpoint to `models.json`
 
@@ -164,7 +176,19 @@ pi --print --no-session --model company/<endpoint model ID> "Reply with OK."
 ```
 
 The first command should list `company/<endpoint model ID>`. The second
-should print `OK`.
+should print `OK`. If it fails:
+
+| Error | Cause and fix |
+| --- | --- |
+| `Failed to resolve API key … from shell command` | The keychain command failed. Run the step 2 check. `exit 44` means no item is stored: add it with `-a "$USER"`. A prompt means you need to click **Always Allow** |
+| `Failed to resolve provider "company" header "<value>"` | Reading the key for that header failed. If `<value>` is your key, the key went in as the header's name: see below |
+
+**If your key ended up in `models.json`**, for example as a header name:
+
+1. Fix the `company` entry, so the header is a name such as `api-key` or there
+   is no `headers` entry at all.
+2. Remove the key from your shell history and anywhere else you pasted it.
+3. Ask the endpoint's owner to rotate the key. Store the new one as in step 2.
 
 ### 5. Use it for reviewers
 
