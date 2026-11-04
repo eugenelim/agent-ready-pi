@@ -67,22 +67,6 @@ agentbundle install --pack core
 
 Commit the installed files, so every checkout and worktree has them.
 
-### While this repository is private
-
-Git needs your GitHub access to install it. Give git a token for that one
-command only:
-
-```bash
-GH_TOKEN="$(gh auth token)" \
-GIT_CONFIG_COUNT=2 \
-GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0= \
-GIT_CONFIG_KEY_1=credential.helper GIT_CONFIG_VALUE_1='!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f' \
-pi install git:github.com/eugenelim/agent-ready-pi@v0.1.3
-```
-
-Once the repository is public, the plain `pi install` command above works
-without a token.
-
 ## What the tool runs
 
 ```
