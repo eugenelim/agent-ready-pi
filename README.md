@@ -15,11 +15,11 @@ Pi needs Node.js 22.19 or newer.
 
 ```bash
 # Personal: written to ~/.pi/agent/settings.json
-pi install git:github.com/eugenelim/agent-ready-pi@v0.1.5
+pi install git:github.com/eugenelim/agent-ready-pi@v0.1.6
 
 # One project: written to the project's .pi/settings.json.
 # Pi loads it only after you trust the project.
-pi install -l git:github.com/eugenelim/agent-ready-pi@v0.1.5
+pi install -l git:github.com/eugenelim/agent-ready-pi@v0.1.6
 
 # Try it once without saving
 pi -e /path/to/agent-ready-pi
@@ -31,12 +31,12 @@ Install the new tag. Pi replaces the old version in place, so there is
 nothing to remove:
 
 ```bash
-pi install git:github.com/eugenelim/agent-ready-pi@v0.1.5
+pi install git:github.com/eugenelim/agent-ready-pi@v0.1.6
 pi list        # shows one entry, at the new tag
 ```
 
 **Do not run `pi remove` with the old tag after upgrading.** Pi matches the
-package without its tag, so removing `@v0.1.4` removes the version you just
+package without its tag, so removing `@v0.1.5` removes the version you just
 installed. If `pi list` ever shows nothing for the package, install it again.
 
 ### Remove
