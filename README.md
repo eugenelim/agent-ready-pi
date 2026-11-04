@@ -15,11 +15,11 @@ Pi needs Node.js 22.19 or newer.
 
 ```bash
 # Personal: written to ~/.pi/agent/settings.json
-pi install git:github.com/eugenelim/agent-ready-pi@v0.1.3
+pi install git:github.com/eugenelim/agent-ready-pi@v0.1.4
 
 # One project: written to the project's .pi/settings.json.
 # Pi loads it only after you trust the project.
-pi install -l git:github.com/eugenelim/agent-ready-pi@v0.1.3
+pi install -l git:github.com/eugenelim/agent-ready-pi@v0.1.4
 
 # Try it once without saving
 pi -e /path/to/agent-ready-pi
@@ -31,12 +31,12 @@ Install the new tag. Pi replaces the old version in place, so there is
 nothing to remove:
 
 ```bash
-pi install git:github.com/eugenelim/agent-ready-pi@v0.1.3
+pi install git:github.com/eugenelim/agent-ready-pi@v0.1.4
 pi list        # shows one entry, at the new tag
 ```
 
 **Do not run `pi remove` with the old tag after upgrading.** Pi matches the
-package without its tag, so removing `@v0.1.2` removes the version you just
+package without its tag, so removing `@v0.1.3` removes the version you just
 installed. If `pi list` ever shows nothing for the package, install it again.
 
 ### Remove
@@ -323,6 +323,31 @@ The role map is strict, so a gate never quietly runs on the wrong model:
 - **Each result records the model it used.** The tool's `details` show
   `model` and `modelSource`, which is `role`, `agent-model`, `parent` or
   `none`.
+
+#### If a review fails
+
+A failed review names the cause, the model the child ran on, where that
+choice came from, and the end of the child's error output. The session then
+stops at the gate instead of reviewing its own work.
+
+| Message | Cause and fix |
+| --- | --- |
+| `exited with code 1` with `source: parent` and `AGENT_READY_PI_ROLE_MODELS is not set` | The terminal that started Pi never loaded the role map, so the child fell back to Pi's own model. Run `source ~/.zshrc`, or open a new window, then start Pi with `--model` |
+| `exited with code 1` with `No API key found` | The child's model has no key. Start Pi with `--model company/<model ID>`, or set the role map |
+| `Unsupported thinking_effort` in the error output | Add a `thinkingLevelMap` for that model, as shown above |
+| `no model for <role>` | The role map leaves out that role. Add it |
+
+To rule out the package, run one child by hand from the repository root:
+
+```bash
+echo "Reply with OK." > /tmp/pi-child-packet.md
+pi --print --no-session --no-extensions --no-skills --no-context-files \
+  --tools read,grep,find,ls --system-prompt .claude/agents/shaping-reviewer.md \
+  --model company/<model ID> @/tmp/pi-child-packet.md; echo "exit $?"
+```
+
+A reply and `exit 0` mean the reviewer and the model work. The shaping
+reviewer will say a test packet is out of scope, which is correct.
 
 #### One model for all reviewers
 
