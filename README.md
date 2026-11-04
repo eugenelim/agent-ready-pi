@@ -372,6 +372,64 @@ security delete-generic-password -s pi-company-llm
 Delete the `company` entry from `models.json`, then revoke the key with the
 endpoint's owner.
 
+## Skills and agents from your user profile
+
+### Skills
+
+Pi loads user skills from two folders: `~/.agents/skills/` and
+`~/.pi/agent/skills/`. To use skills installed somewhere else, such as
+`~/.claude/skills/`, add the folder to `skills` in `~/.pi/agent/settings.json`:
+
+```bash
+python3 - ~/.pi/agent/settings.json <<'EOF'
+import json, os, sys
+p = sys.argv[1]; d = json.load(open(p)) if os.path.exists(p) else {}
+paths = d.setdefault("skills", [])
+if "~/.claude/skills" not in paths: paths.append("~/.claude/skills")
+json.dump(d, open(p, "w"), indent=2); print("skills:", paths)
+EOF
+```
+
+Then start `pi` and check its startup messages for the skills it loaded.
+
+**Loading a skill does not make it work on Pi.** This applies to every skill
+written for another agentic coding tool, such as Claude Code, Codex, Cursor,
+Copilot or Gemini CLI. It applies even when the skill sits in the shared
+`~/.agents/skills/` folder.
+
+- **Missing tools.** Pi has only `read`, `bash`, `edit`, `write`, `grep`,
+  `find`, `ls` and the tools that installed packages add. A step that needs
+  another tool fails or gets skipped. Examples: starting a subagent, invoking
+  another skill, fetching a web page, or calling a tool from an MCP server
+  that Pi has not been set up with.
+- **The skill does not know it is on Pi.** It may name host commands,
+  settings files or folders that Pi does not have. A missing piece is not
+  always reported, so check the result.
+- **Same-named skills.** When two folders hold a skill with the same name,
+  Pi keeps the first one it finds and prints a warning.
+
+Test each skill you rely on before trusting it in a review gate.
+
+### Agents (subagents)
+
+Pi has no subagent system. It does not read agent definitions from any
+folder, whether user or project, and whichever tool they were written for,
+for example `~/.claude/agents/`, `.codex/agents/` or `.github/agents/`.
+
+The `agent_ready_review` tool is the only way this package runs an agent, and
+it has two limits:
+
+- **Three roles only.** It runs `shaping-reviewer`, `adversarial-reviewer`
+  and `finding-adjudicator`. It refuses every other agent, such as a research
+  or design reviewer.
+- **Repository files by default.** It reads the definitions from the
+  repository's `.claude/agents/` or `.apm/agents/`.
+  `AGENT_READY_PI_AGENTS_DIR` points it at another folder. The files there
+  must still define those three roles, with tool lists the package can map.
+
+Running any other agent on Pi would need this package, or another one, to
+support that role and its tool allowlist.
+
 ## Work in several sessions at once
 
 Give each Pi session its own git worktree: a second checkout of the same
