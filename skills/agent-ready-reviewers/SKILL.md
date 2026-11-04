@@ -16,12 +16,30 @@ these reviewers, call the `agent_ready_review` tool instead:
 
 1. Assemble the review packet exactly as the calling skill says. Pass it whole
    as `packet`. The reviewer sees only the packet and the repository; it does
-   not see this conversation.
-2. Take the tool's text back as the reviewer's report. Hand it to the calling
-   skill's own persist-and-classify step unchanged.
+   not see this conversation. Do not tell the reviewer how to format its
+   result: its own agent file sets its output contract.
+2. Take the tool's text back as the reviewer's report, unchanged. Then follow
+   the calling skill's own steps for that kind of report, and only those.
 3. If the tool returns an error, the reviewer is missing. Follow the calling
    skill's rule for a missing reviewer, which is usually `BLOCKED`. Never
    review the work yourself in its place.
+
+## What each report is, and what happens next
+
+The calling skill decides what to do with a report. This package adds no
+steps. As agent-ready Core 4.0 defines them:
+
+| Role | Result format | What the calling skill does |
+| --- | --- | --- |
+| `shaping-reviewer` | `Clean` or `Findings`, each finding with a `Fix:` line | Resolve the findings in the artifact, then run the shaping review again until it returns `Clean`. There is no persist, `raw-classify` or adjudication step |
+| `adversarial-reviewer` | The exact clean sentence `Clean — ready to commit.`, or findings | Persist and validate the report, classify it with `raw-classify`, and send findings to `finding-adjudicator` |
+| `finding-adjudicator` | An adjudication of the supplied findings | Classify and act on the adjudication, as the calling skill says |
+
+- **`raw-classify` is for the adversarial format.** It marks a shaping report
+  `invalid` because a shaping report never contains the adversarial clean
+  sentence. That is expected, not a stop. Do not run `raw-classify` on a
+  shaping report.
+- **If a calling skill's text differs from this table, the skill wins.**
 
 ## How the tool works
 
