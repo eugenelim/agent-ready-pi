@@ -1,0 +1,36 @@
+{
+  "name": "agent-ready-pi",
+  "version": "0.1.0",
+  "description": "Runs agent-ready reviewers as fresh Pi child processes, so a Pi run can pass shaping review, adversarial review and finding adjudication.",
+  "license": "Apache-2.0 OR MIT",
+  "private": true,
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "engines": {
+    "node": ">=22.19"
+  },
+  "pi": {
+    "extensions": [
+      "extensions/review.ts"
+    ],
+    "skills": [
+      "skills/"
+    ]
+  },
+  "scripts": {
+    "test": "node --test test/",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.5.0",
+    "@types/node": "^26.6.6",
+    "typebox": "^1.4.3",
+    "typescript": "^7.0.2"
+  }
+}
