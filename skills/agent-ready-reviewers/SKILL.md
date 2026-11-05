@@ -18,30 +18,45 @@ these reviewers, call the `agent_ready_review` tool instead:
 
 1. Assemble the review packet exactly as the calling skill says. Pass it whole
    as `packet`. The reviewer sees only the packet and the repository; it does
-   not see this conversation. Do not tell the reviewer how to format its
-   result: its own agent file sets its output contract.
+   not see this conversation. Add no output-format instructions of your own:
+   the reviewer's agent file sets its output contract, and the calling skill
+   says when to ask for a typed report instead.
 2. Take the tool's text back as the reviewer's report, unchanged. Then follow
    the calling skill's own steps for that kind of report, and only those.
 3. If the tool returns an error, the reviewer is missing. Follow the calling
    skill's rule for a missing reviewer, which is usually `BLOCKED`. Never
    review the work yourself in its place.
 
-## What each report is, and what happens next
+## Which flow you are in
 
-The calling skill decides what to do with a report. This package adds no
-steps. As agent-ready Core 4.0 defines them:
+What happens to a report depends on the flow the calling skill is running, not
+on the role alone. The calling skill decides each step; this package adds none.
+As agent-ready Core 4.0 defines them (check the named file before acting on a
+detail, because Core changes):
 
-| Role | Result format | What the calling skill does |
-| --- | --- | --- |
-| `shaping-reviewer` | `Clean` or `Findings`, each finding with a `Fix:` line | Resolve the findings in the artifact, then run the shaping review again until it returns `Clean`. There is no persist, `raw-classify` or adjudication step |
-| `adversarial-reviewer` | The exact clean sentence `Clean — ready to commit.`, or findings | Persist and validate the report, classify it with `raw-classify`, and send findings to `finding-adjudicator` |
-| `finding-adjudicator` | An adjudication of the supplied findings | Classify and act on the adjudication, as the calling skill says |
-| `security-reviewer`, `quality-engineer` | The report the calling skill's request asks for | Treat it as that role's report and follow the calling skill, as for any other role |
+| Flow | Report format | What the calling skill does | Owning file |
+| --- | --- | --- | --- |
+| Shaping review (`new-spec`, `intake-intent`) | `Clean` or `Findings`, each with a `Fix:` line | Resolve the findings in the artifact and run the shaping review again until `Clean`. No persist, `raw-classify` or adjudication | the calling skill |
+| Pre-EXECUTE review, before `start` | The exact clean sentence `Clean — ready to commit.`, or findings | Persist the report, `raw-classify` it, and send `findings` to `finding-adjudicator`. A missing adjudicator is a loud stop | work-loop `references/pre-execute-review.md` |
+| Light mode and direct-light | The same sentence or findings | Persist, `raw-classify`, adjudicate what is not clean, and run adversarial rounds until clean. A missing adversarial reviewer is `BLOCKED`. Direct-light has no spec and no run state, so do not invent a spec path. `quality-engineer` runs only when the repo declares a strict external quality gate or a human asks for it | work-loop `references/light-mode.md`, `references/finding-adjudication.md` |
+| Full mode (supervisor) | A typed report: one fenced `json` block, requested through the supervisor's `review-role` request | Persist the return and shape it into the typed report bound to the supervisor's subject. The controller assesses each finding itself; this is not the `raw-classify` path | work-loop `references/supervisor.md` § Review |
 
-- **`raw-classify` is for the adversarial format.** It marks a shaping report
-  `invalid` because a shaping report never contains the adversarial clean
-  sentence. That is expected, not a stop. Do not run `raw-classify` on a
-  shaping report.
+Before acting on a report, check:
+
+- You know which flow you are in. If you cannot tell, the calling skill's
+  mode line or the supervisor's request says; do not guess.
+- The report is from the role you asked for, and you apply that flow's step
+  for that role. An adjudicator's report has its own classification in the
+  calling skill; do not treat it as an adversarial report.
+- **`raw-classify` is for the adversarial format only.** It marks a shaping
+  report `invalid` because a shaping report never contains the adversarial
+  clean sentence. That is expected, not a stop. Do not run it on a shaping
+  report, or on a typed report.
+- **A clean report must be the sentence and nothing else.** Any text before or
+  after the sentinel, apart from blank lines, makes `raw-classify` answer
+  `invalid`, and a `## Not checked` footer sends even a clean report to the
+  adjudicator. `invalid` is a loud stop in the calling skill. Do not edit the
+  report into shape to get past it.
 - **If a calling skill's text differs from this table, the skill wins.**
 
 ## How the tool works
