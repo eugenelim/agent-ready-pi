@@ -18,6 +18,30 @@ const MAX_CONFIG_FILE_BYTES = 64 * 1024;
 /** Default child timeout: 20 minutes. */
 export const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 
+/**
+ * Waits before each retry of a child that failed to resolve its API key. The
+ * keychain command runs under Pi's 10 second limit, so a loaded machine can
+ * time it out; a short, bounded backoff rides that out without stalling a gate.
+ */
+export const KEY_RETRY_DELAYS_MS: readonly number[] = [2000, 4000];
+
+/** What Pi prints when a key command fails or times out. */
+const KEY_RESOLUTION_FAILURE = /Failed to resolve API key .* from shell command/;
+
+/** Sleep that ends early, without throwing, when `signal` aborts. */
+function pause(ms: number, signal?: AbortSignal): Promise<void> {
+	return new Promise((resolve) => {
+		if (signal?.aborted) return resolve();
+		const done = () => {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", done);
+			resolve();
+		};
+		const timer = setTimeout(done, ms);
+		signal?.addEventListener("abort", done, { once: true });
+	});
+}
+
 /** The subset of `pi.exec`'s contract this module relies on. */
 export type ExecFn = (
 	command: string,
@@ -38,6 +62,8 @@ export interface ReviewRequest {
 	parentModel?: string;
 	signal?: AbortSignal;
 	env?: Readonly<Record<string, string | undefined>>;
+	/** Waits before each retry after a key-resolution failure; defaults to `KEY_RETRY_DELAYS_MS`. */
+	keyRetryDelaysMs?: readonly number[];
 }
 
 /** The outcome handed back to the caller's persist-and-classify path. */
@@ -53,6 +79,8 @@ export interface ReviewResult {
 		roleMapFrom?: RoleMapOrigin;
 		root: string;
 		exitCode: number;
+		/** How many times the child was started; above 1 means a key-resolution retry. */
+		attempts: number;
 		killed: boolean;
 		stderr: string;
 		error?: string;
@@ -311,11 +339,23 @@ export async function runReview(request: ReviewRequest): Promise<ReviewResult> {
 		writeFileSync(systemPromptFile, plan.agentBody, { mode: 0o600 });
 		writeFileSync(packetFile, request.packet, { mode: 0o600 });
 		const args = [...request.pi.args, ...buildChildArgs({ allowlist, systemPromptFile, packetFile, model })];
-		const result = await request.exec(request.pi.command, args, {
-			signal: request.signal,
-			timeout: timeoutMs(env),
-			cwd: plan.root,
-		});
+		const delays = request.keyRetryDelaysMs ?? KEY_RETRY_DELAYS_MS;
+		let attempts = 0;
+		let result;
+		for (;;) {
+			attempts += 1;
+			result = await request.exec(request.pi.command, args, {
+				signal: request.signal,
+				timeout: timeoutMs(env),
+				cwd: plan.root,
+			});
+			// Only a failed key lookup is retried: it produced no review, and any other failure is real.
+			const retryable = result.code !== 0 && !result.killed && KEY_RESOLUTION_FAILURE.test(result.stderr);
+			const delay = delays[attempts - 1];
+			if (!retryable || delay === undefined || request.signal?.aborted) break;
+			await pause(delay, request.signal);
+			if (request.signal?.aborted) break;
+		}
 		const report = result.stdout.trim();
 		const killed = result.killed === true;
 		let error: string | undefined;
@@ -334,6 +374,7 @@ export async function runReview(request: ReviewRequest): Promise<ReviewResult> {
 				...(plan.roleMapFrom ? { roleMapFrom: plan.roleMapFrom } : {}),
 				root: plan.root,
 				exitCode: result.code,
+				attempts,
 				killed,
 				stderr: result.stderr.slice(-4000),
 				...(error ? { error } : {}),

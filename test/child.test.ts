@@ -51,7 +51,7 @@ async function review(
 	role: string,
 	repo: string,
 	env: Record<string, string> = {},
-	extra: { parentModel?: string; signal?: AbortSignal } = {},
+	extra: { parentModel?: string; signal?: AbortSignal; keyRetryDelaysMs?: readonly number[] } = {},
 ) {
 	const capture = join(repo, "capture.json");
 	// Point the settings file inside the fixture, so the developer's real one is never read.
@@ -350,6 +350,44 @@ describe("child failures are never clean", () => {
 		setTimeout(() => controller.abort(), 200);
 		const { result } = await review("shaping-reviewer", fixtureRepo("repo"), { FAKE_PI_MODE: "hang" }, { signal: controller.signal });
 		assert.equal(result.ok, false);
+	});
+});
+
+describe("key resolution failures", () => {
+	const flaky = (repo: string, failures: number) => ({
+		FAKE_PI_MODE: "key-flaky",
+		FAKE_PI_COUNTER: join(repo, "counter"),
+		FAKE_PI_KEY_FAILURES: String(failures),
+	});
+
+	it("retries and succeeds once the key resolves", async () => {
+		const repo = fixtureRepo("repo");
+		const { result } = await review("shaping-reviewer", repo, flaky(repo, 2), { keyRetryDelaysMs: [10, 10] });
+		assert.equal(result.ok, true);
+		assert.equal(result.details.attempts, 3);
+	});
+
+	it("stops after the delays run out and reports the failure", async () => {
+		const repo = fixtureRepo("repo");
+		const { result } = await review("shaping-reviewer", repo, flaky(repo, 99), { keyRetryDelaysMs: [10, 10] });
+		assert.equal(result.ok, false);
+		assert.equal(result.details.attempts, 3);
+		assert.match(result.details.stderr, /Failed to resolve API key/);
+	});
+
+	it("does not retry any other failure", async () => {
+		const { result } = await review("shaping-reviewer", fixtureRepo("repo"), { FAKE_PI_MODE: "fail" }, { keyRetryDelaysMs: [10, 10] });
+		assert.equal(result.details.attempts, 1);
+	});
+
+	it("stops retrying when the call is aborted", async () => {
+		const repo = fixtureRepo("repo");
+		const controller = new AbortController();
+		setTimeout(() => controller.abort(), 150);
+		const started = Date.now();
+		const { result } = await review("shaping-reviewer", repo, flaky(repo, 99), { signal: controller.signal, keyRetryDelaysMs: [60_000] });
+		assert.equal(result.ok, false);
+		assert.ok(Date.now() - started < 5000);
 	});
 });
 

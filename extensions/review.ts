@@ -44,6 +44,11 @@ export function failureText(details: ReviewResult["details"]): string {
 	if (details.modelSource !== "role") {
 		lines.push("No role map is set, so the child did not use a per-role model. Call agent_ready_review with check: true to see the settings it reads.");
 	}
+	if (/Failed to resolve API key .* from shell command/.test(details.stderr)) {
+		lines.push(
+			`The key command failed or timed out after ${details.attempts} attempt(s). Pi limits it to 10 seconds, so a heavily loaded machine can trip it. Retry once the load drops; if it persists, run the README's key check.`,
+		);
+	}
 	const tail = details.stderr.trim().split("\n").slice(-STDERR_TAIL_LINES).join("\n");
 	if (tail) lines.push("Child error output (last lines):", tail);
 	return lines.join("\n");

@@ -15,11 +15,11 @@ Pi needs Node.js 22.19 or newer.
 
 ```bash
 # Personal: written to ~/.pi/agent/settings.json
-pi install git:github.com/eugenelim/agent-ready-pi@v0.1.6
+pi install git:github.com/eugenelim/agent-ready-pi@v0.1.7
 
 # One project: written to the project's .pi/settings.json.
 # Pi loads it only after you trust the project.
-pi install -l git:github.com/eugenelim/agent-ready-pi@v0.1.6
+pi install -l git:github.com/eugenelim/agent-ready-pi@v0.1.7
 
 # Try it once without saving
 pi -e /path/to/agent-ready-pi
@@ -31,7 +31,7 @@ Install the new tag. Pi replaces the old version in place, so there is
 nothing to remove:
 
 ```bash
-pi install git:github.com/eugenelim/agent-ready-pi@v0.1.6
+pi install git:github.com/eugenelim/agent-ready-pi@v0.1.7
 pi list        # shows one entry, at the new tag
 ```
 
@@ -354,6 +354,7 @@ stops at the gate instead of reviewing its own work.
 | Message | Cause and fix |
 | --- | --- |
 | `exited with code 1` with `source: parent` and `No role map is set` | Neither the settings file nor `AGENT_READY_PI_ROLE_MODELS` has a role map, so the child fell back to Pi's own model. Write the settings file; the next call uses it |
+| `Failed to resolve API key … from shell command` after 3 attempts | The keychain command timed out or failed on every try. Pi gives it 10 seconds, so a heavily loaded machine can trip it. The tool already retries twice, after 2 and 4 seconds. Retry when the load drops; if it persists, run the step 2 key check |
 | `exited with code 1` with `No API key found` | The child's model has no key. Start Pi with `--model company/<model ID>`, or set the role map |
 | `Unsupported thinking_effort` in the error output | Add a `thinkingLevelMap` for that model, as shown above |
 | `no model for <role>` | The role map leaves out that role. Add it |
