@@ -1,6 +1,6 @@
 {
   "name": "agent-ready-pi",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Runs agent-ready reviewers as fresh Pi child processes, so a Pi run can pass the shaping, adversarial, adjudication, security and quality review gates.",
   "license": "Apache-2.0 OR MIT",
   "private": true,
