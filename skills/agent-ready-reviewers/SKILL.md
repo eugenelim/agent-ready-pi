@@ -1,6 +1,6 @@
 ---
 name: agent-ready-reviewers
-description: Use when an agent-ready skill (new-spec, intake-intent, author-delivery-brief or work-loop) says to dispatch the shaping-reviewer, adversarial-reviewer or finding-adjudicator subagent on Pi. Pi has no sub-agents; route that dispatch to the agent_ready_review tool.
+description: Use when an agent-ready skill (new-spec, intake-intent, author-delivery-brief or work-loop) says to dispatch the shaping-reviewer, adversarial-reviewer, finding-adjudicator, security-reviewer or quality-engineer subagent on Pi. Pi has no sub-agents; route that dispatch to the agent_ready_review tool.
 ---
 
 # Agent-ready reviewers on Pi
@@ -13,6 +13,8 @@ these reviewers, call the `agent_ready_review` tool instead:
 | `shaping-reviewer` | `agent_ready_review` with `role: "shaping-reviewer"` |
 | `adversarial-reviewer` | `agent_ready_review` with `role: "adversarial-reviewer"` |
 | `finding-adjudicator` | `agent_ready_review` with `role: "finding-adjudicator"` |
+| `security-reviewer` | `agent_ready_review` with `role: "security-reviewer"` |
+| `quality-engineer` | `agent_ready_review` with `role: "quality-engineer"` |
 
 1. Assemble the review packet exactly as the calling skill says. Pass it whole
    as `packet`. The reviewer sees only the packet and the repository; it does
@@ -34,6 +36,7 @@ steps. As agent-ready Core 4.0 defines them:
 | `shaping-reviewer` | `Clean` or `Findings`, each finding with a `Fix:` line | Resolve the findings in the artifact, then run the shaping review again until it returns `Clean`. There is no persist, `raw-classify` or adjudication step |
 | `adversarial-reviewer` | The exact clean sentence `Clean — ready to commit.`, or findings | Persist and validate the report, classify it with `raw-classify`, and send findings to `finding-adjudicator` |
 | `finding-adjudicator` | An adjudication of the supplied findings | Classify and act on the adjudication, as the calling skill says |
+| `security-reviewer`, `quality-engineer` | The report the calling skill's request asks for | Treat it as that role's report and follow the calling skill, as for any other role |
 
 - **`raw-classify` is for the adversarial format.** It marks a shaping report
   `invalid` because a shaping report never contains the adversarial clean
@@ -76,5 +79,5 @@ These facts are settled. Use them instead of working them out.
   source, and the end of the child's error output. Report that to the user
   with the fix it points to, then stop at the gate.
 
-Every other role, including `implementer`, stays on the calling skill's own
-single-agent fallback.
+Any other role, including `implementer`, is not run by this tool and stays on
+the calling skill's own fallback.

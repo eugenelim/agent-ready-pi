@@ -4,7 +4,13 @@
  */
 
 /** Reviewer roles this package can run. Any other role is refused. */
-export const ROLES = ["shaping-reviewer", "adversarial-reviewer", "finding-adjudicator"] as const;
+export const ROLES = [
+	"shaping-reviewer",
+	"adversarial-reviewer",
+	"finding-adjudicator",
+	"security-reviewer",
+	"quality-engineer",
+] as const;
 
 export type Role = (typeof ROLES)[number];
 

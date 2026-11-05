@@ -74,6 +74,8 @@ describe("child argv per role", () => {
 		"shaping-reviewer": "read,grep,find,ls",
 		"adversarial-reviewer": "read,grep,find,ls,bash",
 		"finding-adjudicator": "read,grep",
+		"security-reviewer": "read,grep,find,ls,bash",
+		"quality-engineer": "read,grep,find,ls,bash",
 	};
 	for (const role of ROLES) {
 		it(`${role} runs with its exact allowlist and fixed flags`, async () => {
@@ -147,11 +149,15 @@ describe("per-role models", () => {
 		"shaping-reviewer": "company/kimi-k3",
 		"adversarial-reviewer": "company/glm-5-3",
 		"finding-adjudicator": "company/kimi-k3:high",
+		"security-reviewer": "company/glm-5-3:high",
+		"quality-engineer": "company/glm-5-3:high",
 	});
 	const expected: Record<string, string> = {
 		"shaping-reviewer": "company/kimi-k3",
 		"adversarial-reviewer": "company/glm-5-3",
 		"finding-adjudicator": "company/kimi-k3:high",
+		"security-reviewer": "company/glm-5-3:high",
+		"quality-engineer": "company/glm-5-3:high",
 	};
 	for (const role of ROLES) {
 		it(`${role} uses its own model from AGENT_READY_PI_ROLE_MODELS`, async () => {

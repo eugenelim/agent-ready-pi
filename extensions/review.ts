@@ -72,11 +72,11 @@ export default function (pi: ExtensionAPI): void {
 		name: "agent_ready_review",
 		label: "Agent-ready review",
 		description:
-			"Run one agent-ready reviewer (shaping-reviewer, adversarial-reviewer or finding-adjudicator) " +
+			"Run one agent-ready reviewer (shaping-reviewer, adversarial-reviewer, finding-adjudicator, security-reviewer or quality-engineer) " +
 			"in a fresh, sessionless Pi child with that role's own tool allowlist, and return its report unchanged.",
 		promptSnippet: "Run an agent-ready reviewer in a fresh Pi child process",
 		promptGuidelines: [
-			"When an agent-ready skill says to dispatch the shaping-reviewer, adversarial-reviewer or finding-adjudicator subagent, call agent_ready_review with that role and the review packet the skill assembles.",
+			"When an agent-ready skill says to dispatch the shaping-reviewer, adversarial-reviewer, finding-adjudicator, security-reviewer or quality-engineer subagent, call agent_ready_review with that role and the review packet the skill assembles.",
 			"Treat an agent_ready_review error as a missing reviewer, exactly as the skill defines it; never replace it with your own review, and never run a reviewer child by hand in its place.",
 			"Before a gate, or after fixing reviewer settings, call agent_ready_review with check: true to see the model, review root and agent file it would use. Do not infer them from the bash tool's environment.",
 		],

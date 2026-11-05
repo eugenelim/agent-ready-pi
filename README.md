@@ -1,8 +1,9 @@
 # agent-ready-pi
 
-A Pi package that lets a Pi run pass the three agent-ready review gates.
-Without it, a run stops there: shaping review, adversarial review and finding
-adjudication all need an independent reviewer, and Pi has no sub-agents.
+A Pi package that lets a Pi run pass the agent-ready review gates. Without
+it, a run stops there: shaping review, adversarial review, finding
+adjudication and the security and quality passes all need an independent
+reviewer, and Pi has no sub-agents.
 
 The package adds one tool, `agent_ready_review`. It runs each reviewer as a
 fresh `pi --print` child process with that role's own tool allowlist. It is
@@ -94,12 +95,15 @@ pi --print --no-session --no-extensions --no-skills --no-context-files \
 | `shaping-reviewer` | Read, Grep, Glob | `read,grep,find,ls` |
 | `adversarial-reviewer` | Read, Grep, Glob, Bash | `read,grep,find,ls,bash` |
 | `finding-adjudicator` | Read, Grep | `read,grep` |
+| `security-reviewer` | Read, Grep, Glob, Bash | `read,grep,find,ls,bash` |
+| `quality-engineer` | Read, Grep, Glob, Bash | `read,grep,find,ls,bash` |
 
 The mapping is Read→`read`, Grep→`grep`, Glob→`find,ls` and Bash→`bash`.
 `edit` and `write` are never granted.
 
-**`adversarial-reviewer` has `bash`.** Its list is wider than read-only,
-because it reruns the failures it reports. The limits above are tool-level
+**`adversarial-reviewer`, `security-reviewer` and `quality-engineer` have
+`bash`.** Their lists are wider than read-only, because they rerun the
+failures they report. The limits above are tool-level
 only. Pi has no permission system, so they are not an OS sandbox. Run Pi
 inside a container when the repository holds code you do not trust.
 
@@ -281,6 +285,8 @@ check newer releases before you adopt it.
 | `adversarial-reviewer` | GLM-5.3 | Reproduces failures with `bash` |
 | `shaping-reviewer` | Kimi K3 | Judges a contract; reasoning matters most |
 | `finding-adjudicator` | Kimi K3 | A different model family from the reviewer whose findings it judges |
+| `security-reviewer` | GLM-5.3 | Runs `bash` to probe a boundary |
+| `quality-engineer` | GLM-5.3 | Runs `bash` to check tests and behaviour |
 
 First add Kimi K3 to the `company` provider in `models.json`, next to
 GLM-5.3. Use the endpoint's real limits:
@@ -313,7 +319,9 @@ cat > "$PI_DIR/agent-ready-pi.json" <<'EOF'
   "roleModels": {
     "shaping-reviewer": "company/kimi-k3",
     "adversarial-reviewer": "company/glm-5-3",
-    "finding-adjudicator": "company/kimi-k3"
+    "finding-adjudicator": "company/kimi-k3",
+    "security-reviewer": "company/glm-5-3",
+    "quality-engineer": "company/glm-5-3"
   }
 }
 EOF
@@ -454,13 +462,14 @@ for example `~/.claude/agents/`, `.codex/agents/` or `.github/agents/`.
 The `agent_ready_review` tool is the only way this package runs an agent, and
 it has two limits:
 
-- **Three roles only.** It runs `shaping-reviewer`, `adversarial-reviewer`
-  and `finding-adjudicator`. It refuses every other agent, such as a research
+- **Five roles only.** It runs `shaping-reviewer`, `adversarial-reviewer`,
+  `finding-adjudicator`, `security-reviewer` and `quality-engineer`. It refuses
+  every other agent, such as a research
   or design reviewer.
 - **Repository files by default.** It reads the definitions from the
   repository's `.claude/agents/` or `.apm/agents/`.
   `AGENT_READY_PI_AGENTS_DIR` points it at another folder. The files there
-  must still define those three roles, with tool lists the package can map.
+  must still define those five roles, with tool lists the package can map.
 
 Running any other agent on Pi would need this package, or another one, to
 support that role and its tool allowlist.
