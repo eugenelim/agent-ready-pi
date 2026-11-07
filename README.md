@@ -10,6 +10,27 @@ fresh `pi --print` child process with that role's own tool allowlist. It is
 optional and installed separately. agent-ready Core does not import, bundle,
 install or select it.
 
+## Contents
+
+Frequent commands:
+
+- [Start a session in a new worktree](#start-a-session)
+- [Check which model each reviewer will use](#check-what-the-tool-will-use)
+- [Fix a failed review](#troubleshooting)
+- [Upgrade the package](#upgrade)
+
+All sections:
+
+1. [Install](#install): [upgrade](#upgrade), [remove](#remove), [what the project needs](#what-the-project-needs)
+2. [Work in several sessions at once](#work-in-several-sessions-at-once): [start a session](#start-a-session), [see and remove worktrees](#see-and-remove-worktrees)
+3. [Set up a hosted model](#set-up-a-hosted-model): steps 1 to 4, [other hosts](#a-host-pi-already-supports), [remove it afterwards](#remove-it-afterwards)
+4. [Map a model to each role](#map-a-model-to-each-role): [recommended models](#recommended-a-model-per-role), [write the settings file](#write-the-settings-file), [check what the tool will use](#check-what-the-tool-will-use), [the role map's rules](#the-role-maps-rules), [one model for all reviewers](#one-model-for-all-reviewers)
+5. [Troubleshooting](#troubleshooting): [a review fails](#if-a-review-fails), [which role map is in force](#which-role-map-is-in-force), [run one child by hand](#run-one-child-by-hand)
+6. [What the tool runs](#what-the-tool-runs), [role allowlists](#role-allowlists), [independence](#independence)
+7. [Skills and agents from your user profile](#skills-and-agents-from-your-user-profile)
+8. [Configuration](#configuration)
+9. [Development](#development), [versions](#versions), [support](#support), [license](#license)
+
 ## Install
 
 Pi needs Node.js 22.19 or newer.
@@ -68,60 +89,61 @@ agentbundle install --pack core
 
 Commit the installed files, so every checkout and worktree has them.
 
-## What the tool runs
+## Work in several sessions at once
 
+Give each Pi session its own git worktree: a second checkout of the same
+repository, in its own folder and on its own branch. Sessions then never edit
+each other's files.
+
+### Start a session
+
+Run this from anywhere inside the repository. Change `TOPIC` for each
+session:
+
+```bash
+TOPIC=my-change                                   # a short branch name for this session
+BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD || echo origin/main)
+ROOT=$(git rev-parse --show-toplevel)
+WT="$(dirname "$ROOT")/$(basename "$ROOT")-$TOPIC"
+git fetch origin
+git worktree add -b "$TOPIC" "$WT" "$BASE"
+cd "$WT"
+pi --model company/<endpoint model ID>
 ```
-pi --print --no-session --no-extensions --no-skills --no-context-files \
-   --tools <allowlist> --system-prompt <agent body> [--model <m>] @<packet>
+
+The worktree sits beside the repository, for example `myrepo-my-change`
+next to `myrepo`. It starts from the latest remote default branch.
+
+**Notes**
+
+- **Start Pi inside the worktree that holds the work.** Reviewers read files
+  at the git root of the folder Pi was started in. A session started in the
+  main checkout reviews the main checkout's files, not the worktree's.
+- **Uncommitted changes stay behind.** A new worktree has only committed work.
+- **Setup is shared.** The package install, `models.json` and the keychain
+  key are per user, so a worktree needs no setup of its own.
+- **Trust is per folder.** Pi may ask whether to trust the new folder. Give
+  the same answer you gave for the main checkout.
+- **Reviewer files must be committed.** The tool reads `.claude/agents/` or
+  `.apm/agents/` inside the worktree. Check with
+  `ls .claude/agents .apm/agents`. If they are missing because they are not
+  committed, point the tool at the main checkout:
+  `export AGENT_READY_PI_AGENTS_DIR="$ROOT/.claude/agents"`.
+
+### See and remove worktrees
+
+See the open worktrees, and remove one once its branch is merged:
+
+```bash
+git worktree list
+git worktree remove "$WT"
+git branch -d "$TOPIC"
 ```
 
-- **`--no-session`:** the child starts cold. It saves no session and shares no
-  conversation with the parent.
-- **`--no-extensions`:** the child cannot call `agent_ready_review` itself, so
-  a review cannot recurse.
-- **`--no-skills` and `--no-context-files`:** the child loads no skills and no
-  `AGENTS.md` or `CLAUDE.md`. Each reviewer body tells it which repository
-  files to read.
-- **Prompt files:** the agent body and the packet go to a private temporary
-  directory, with files at mode 0600. The directory is removed after the run.
-- **Failure:** if the role, agent file or a `tools:` entry is unknown, the
-  call fails closed. A child that exits non-zero, is killed or prints nothing
-  returns an error. A failure is never reported as a clean review.
+`git worktree remove` refuses while the worktree has uncommitted changes, so
+nothing is lost by accident.
 
-## Role allowlists
-
-| Role | Agent file `tools:` | Pi `--tools` |
-| --- | --- | --- |
-| `shaping-reviewer` | Read, Grep, Glob | `read,grep,find,ls` |
-| `adversarial-reviewer` | Read, Grep, Glob, Bash | `read,grep,find,ls,bash` |
-| `finding-adjudicator` | Read, Grep | `read,grep` |
-| `security-reviewer` | Read, Grep, Glob, Bash | `read,grep,find,ls,bash` |
-| `quality-engineer` | Read, Grep, Glob, Bash | `read,grep,find,ls,bash` |
-
-The mapping is Read→`read`, Grep→`grep`, Glob→`find,ls` and Bash→`bash`.
-`edit` and `write` are never granted.
-
-**`adversarial-reviewer`, `security-reviewer` and `quality-engineer` have
-`bash`.** Their lists are wider than read-only, because they rerun the
-failures they report. The limits above are tool-level
-only. Pi has no permission system, so they are not an OS sandbox. Run Pi
-inside a container when the repository holds code you do not trust.
-
-## Independence
-
-agent-ready's shaping-review gate accepts "a genuinely fresh context" as an
-independent reviewer. This package claims that a fresh `--no-session` child,
-which loads no session and no context files, is that fresh context.
-
-**Whether to accept the claim is your decision** for your own review gates.
-agent-ready Core's gate text does not mention this package. If you do not
-accept it, keep a human reviewer for shaping review on Pi.
-
-The child uses the parent's model unless you map another. A different model
-for the adjudicator, as recommended below, adds independence that a fresh
-process alone does not give.
-
-## Use a hosted model
+## Set up a hosted model
 
 Reviewers can run on any model Pi can reach. The default setup below uses a
 company endpoint that serves GLM-5.3, an open-weight model, over an
@@ -239,7 +261,7 @@ should print `OK`. If it fails:
 | `404 status code (no body)` | The base URL is wrong. Pi sends requests to `<baseUrl>/chat/completions`, so the base URL ends at the API root, often `/v1` |
 | The endpoint redirects to `/login` | The URL is the browser app, or the endpoint did not recognise the key. Find the API path and key header with the check below |
 | `403` with `key_model_access_denied` | The model name is wrong, or your key may not use it. List the names your key can use with the check below |
-| `Unsupported thinking_effort='medium'; supported values are [...]` | The endpoint accepts other thinking levels for this model. Add a `thinkingLevelMap`, as shown for Kimi K3 in step 5 |
+| `Unsupported thinking_effort='medium'; supported values are [...]` | The endpoint accepts other thinking levels for this model. Add a `thinkingLevelMap`, as shown for Kimi K3 under [Map a model to each role](#map-a-model-to-each-role) |
 | `Model "<id>" not found for provider "company". Using custom model id.` | The request reached the endpoint, but `models.json` has a different ID. Pi then ignores your limits. Make the `id` match |
 
 To list the models your key can use, run this check. It prints only model
@@ -264,13 +286,35 @@ or a redirect to `/login` means one of them is wrong.
 2. Remove the key from your shell history and anywhere else you pasted it.
 3. Ask the endpoint's owner to rotate the key. Store the new one as in step 2.
 
-### 5. Use it for reviewers
+### A host Pi already supports
 
-To run Pi and every reviewer on one model, start Pi with
-`--model company/<endpoint model ID>`. Reviewer children use the parent's
-model unless you map another.
+Fireworks, Together AI, OpenRouter, Z.ai, Moonshot, Hugging Face and the
+other providers in Pi's `docs/providers.md` come with their endpoints built
+in. Skip step 3: set the host's key variable, then use
+`--model <provider>/<model ID>`:
 
-#### Recommended: a model per role
+```bash
+export FIREWORKS_API_KEY="$(security find-generic-password -s pi-fireworks -w)"
+pi --list-models glm
+```
+
+### Remove it afterwards
+
+```bash
+security delete-generic-password -s pi-company-llm
+```
+
+Delete the `company` entry from `models.json`, then revoke the key with the
+endpoint's owner.
+
+## Map a model to each role
+
+By default every reviewer child uses the parent's model, which is the model
+Pi itself runs on. To run Pi and every reviewer on one model, start Pi with
+`--model company/<endpoint model ID>` and stop here. To give each reviewer
+its own model, follow the rest of this section.
+
+### Recommended: a model per role
 
 Use GLM-5.3 where tool use matters and Kimi K3 where reasoning matters.
 This advice dates from November 2026. It rests mainly on Artificial
@@ -309,36 +353,72 @@ GLM-5.3. Use the endpoint's real limits:
 accepts. Some Kimi K3 deployments accept only `low`, `high` and `max`, so
 Pi's default `medium` is sent as `high`.
 
-Then map each role in the settings file, `agent-ready-pi.json` in Pi's
-configuration directory. Use your endpoint's model IDs:
+### Write the settings file
+
+The settings file is `agent-ready-pi.json` in Pi's configuration directory.
+Its one key, `roleModels`, maps each role to a model. Use your endpoint's
+model IDs.
+
+Run this from any directory. It adds any role the file does not list yet.
+It never changes an entry you already have, and it stops without writing if
+the file is not valid JSON:
 
 ```bash
-PI_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"; mkdir -p "$PI_DIR"
-cat > "$PI_DIR/agent-ready-pi.json" <<'EOF'
-{
-  "roleModels": {
+python3 - <<'EOF'
+import json, os
+d = os.environ.get("PI_CODING_AGENT_DIR") or os.path.expanduser("~/.pi/agent")
+p = os.environ.get("AGENT_READY_PI_CONFIG") or os.path.join(d, "agent-ready-pi.json")
+want = {
     "shaping-reviewer": "company/kimi-k3",
     "adversarial-reviewer": "company/glm-5-3",
     "finding-adjudicator": "company/kimi-k3",
     "security-reviewer": "company/glm-5-3",
-    "quality-engineer": "company/glm-5-3"
-  }
+    "quality-engineer": "company/glm-5-3",
 }
+data = json.load(open(p)) if os.path.exists(p) else {}
+roles = data.setdefault("roleModels", {})
+for role, model in want.items():
+    roles.setdefault(role, model)
+os.makedirs(os.path.dirname(p), exist_ok=True)
+with open(p, "w") as f:
+    json.dump(data, f, indent=2); f.write("\n")
+print(p); print(json.dumps(roles, indent=2))
 EOF
-pi --model company/glm-5-3
 ```
 
-The tool reads this file on every call, so an edit applies straight away,
-in every terminal and worktree, without restarting Pi.
+Start Pi with `pi --model company/glm-5-3`. The tool reads the file on every
+call, so an edit applies straight away, in every terminal and worktree,
+without restarting Pi.
 
-`AGENT_READY_PI_ROLE_MODELS` still works and takes priority over the file.
-It is read only when Pi starts, so a change to it needs a restart. If you set
-it in `~/.zshrc` before v0.1.5, remove that line and use the file:
-`sed -i '' '/AGENT_READY_PI_ROLE_MODELS/d' ~/.zshrc`, then open a new window.
+**`AGENT_READY_PI_ROLE_MODELS` overrides the file.** It still works and takes
+priority. Pi reads it only at startup, so a Pi that was started with it keeps
+its old map, and a role the variable leaves out fails even when the file lists
+it. If you ever set it, see [Which role map is in force](#which-role-map-is-in-force).
 
-To see what the tool will use, ask Pi to call `agent_ready_review` with
-`check: true` for a role. It reports the model and where it came from, the
-review root, the agent file and the tools, without running a reviewer.
+### Check what the tool will use
+
+Run this in a Pi session started inside a repository that has agent-ready
+Core installed. The tool looks for each reviewer's agent file there, so the
+check fails outside such a repository. It reports the model and where it came
+from, the review root, the agent file and the tools, and runs no reviewer.
+
+For one role, changing the role name each time:
+
+```text
+Call agent_ready_review with check: true and role: "security-reviewer". Report the model, where it came from, and the settings file it consulted. Don't run a reviewer.
+```
+
+For all five roles:
+
+```text
+Call agent_ready_review with check: true once for each of shaping-reviewer, adversarial-reviewer, finding-adjudicator, security-reviewer and quality-engineer. Don't run any reviewer. Give me a table of role, model, and source. Flag any role that is missing a model or whose source is AGENT_READY_PI_ROLE_MODELS.
+```
+
+Read the `Model:` line. `from AGENT_READY_PI_ROLE_MODELS` means the
+environment variable is in force. A path ending `agent-ready-pi.json` means
+the settings file is.
+
+### The role map's rules
 
 The role map is strict, so a gate never quietly runs on the wrong model:
 
@@ -353,7 +433,20 @@ The role map is strict, so a gate never quietly runs on the wrong model:
   `model` and `modelSource`, which is `role`, `agent-model`, `parent` or
   `none`. For a role map, `roleMapFrom` says `env` or `file`.
 
-#### If a review fails
+### One model for all reviewers
+
+To send every reviewer to one model, map the agent files' `model:` value.
+Every agent-ready reviewer declares `model: opus`:
+
+```bash
+export AGENT_READY_PI_MODELS='{"opus":"company/<endpoint model ID>"}'
+```
+
+A role map, from the settings file or `AGENT_READY_PI_ROLE_MODELS`, takes priority over this.
+
+## Troubleshooting
+
+### If a review fails
 
 A failed review names the cause, the model the child ran on, where that
 choice came from, and the end of the child's error output. The session then
@@ -361,13 +454,46 @@ stops at the gate instead of reviewing its own work.
 
 | Message | Cause and fix |
 | --- | --- |
+| `AGENT_READY_PI_ROLE_MODELS has no model for <role>` | Pi was started with that variable set, and its map leaves out the role. The variable overrides the settings file, so adding the role to the file does not help. Follow [Which role map is in force](#which-role-map-is-in-force) |
+| `roleModels in <path> has no model for <role>` | The settings file leaves out the role. Run the [settings file script](#write-the-settings-file); the next call uses it |
 | `exited with code 1` with `source: parent` and `No role map is set` | Neither the settings file nor `AGENT_READY_PI_ROLE_MODELS` has a role map, so the child fell back to Pi's own model. Write the settings file; the next call uses it |
 | `Failed to resolve API key … from shell command` after 3 attempts | The keychain command timed out or failed on every try. Pi gives it 10 seconds, so a heavily loaded machine can trip it. The tool already retries twice, after 2 and 4 seconds. Retry when the load drops; if it persists, run the step 2 key check |
 | `exited with code 1` with `No API key found` | The child's model has no key. Start Pi with `--model company/<model ID>`, or set the role map |
-| `Unsupported thinking_effort` in the error output | Add a `thinkingLevelMap` for that model, as shown above |
-| `no model for <role>` | The role map leaves out that role. Add it |
+| `Unsupported thinking_effort` in the error output | Add a `thinkingLevelMap` for that model, as shown under [Recommended: a model per role](#recommended-a-model-per-role) |
 | `incomplete model for <role>: "company/"` | The model name is missing after the provider. Fix the value |
 | The review reads old files, or files are missing | Pi was started in a different worktree from the work. Exit, `cd` to the worktree that holds the work, and run `pi --continue` |
+
+### Which role map is in force
+
+The tool uses the first map it finds, in this order:
+
+1. `AGENT_READY_PI_ROLE_MODELS` in Pi's own environment, fixed when Pi
+   started.
+2. `roleModels` in the settings file, read on every call.
+
+To fix a role that reports no model:
+
+1. Run the [check prompt](#check-what-the-tool-will-use) in the failing
+   session. If the `Model:` line says `from AGENT_READY_PI_ROLE_MODELS`, the
+   variable is overriding your file.
+2. Make the settings file complete with the
+   [settings file script](#write-the-settings-file).
+3. Find where the variable is set. Check your shell, then look in any
+   launcher script, terminal profile or session manager that starts Pi:
+
+   ```bash
+   echo "[$AGENT_READY_PI_ROLE_MODELS]"
+   grep -n AGENT_READY_PI_ROLE_MODELS ~/.zshrc ~/.zprofile ~/.zshenv ~/.bashrc 2>/dev/null
+   ```
+
+4. Remove the variable so the file is used, or add the missing roles to it.
+   For a line in `~/.zshrc`:
+   `sed -i '' '/AGENT_READY_PI_ROLE_MODELS/d' ~/.zshrc`.
+5. Start a new Pi. A running Pi keeps the environment it started with.
+6. Run the check prompt for all five roles. Each should report the settings
+   file as its source.
+
+### Run one child by hand
 
 To rule out the package, run one child by hand from the repository root.
 This check is for people diagnosing setup. Its output is not a review result,
@@ -383,37 +509,58 @@ pi --print --no-session --no-extensions --no-skills --no-context-files \
 A reply and `exit 0` mean the reviewer and the model work. The shaping
 reviewer will say a test packet is out of scope, which is correct.
 
-#### One model for all reviewers
+## What the tool runs
 
-To send every reviewer to one model, map the agent files' `model:` value.
-Every agent-ready reviewer declares `model: opus`:
-
-```bash
-export AGENT_READY_PI_MODELS='{"opus":"company/<endpoint model ID>"}'
+```
+pi --print --no-session --no-extensions --no-skills --no-context-files \
+   --tools <allowlist> --system-prompt <agent body> [--model <m>] @<packet>
 ```
 
-A role map, from the settings file or `AGENT_READY_PI_ROLE_MODELS`, takes priority over this.
+- **`--no-session`:** the child starts cold. It saves no session and shares no
+  conversation with the parent.
+- **`--no-extensions`:** the child cannot call `agent_ready_review` itself, so
+  a review cannot recurse.
+- **`--no-skills` and `--no-context-files`:** the child loads no skills and no
+  `AGENTS.md` or `CLAUDE.md`. Each reviewer body tells it which repository
+  files to read.
+- **Prompt files:** the agent body and the packet go to a private temporary
+  directory, with files at mode 0600. The directory is removed after the run.
+- **Failure:** if the role, agent file or a `tools:` entry is unknown, the
+  call fails closed. A child that exits non-zero, is killed or prints nothing
+  returns an error. A failure is never reported as a clean review.
 
-### A host Pi already supports
+## Role allowlists
 
-Fireworks, Together AI, OpenRouter, Z.ai, Moonshot, Hugging Face and the
-other providers in Pi's `docs/providers.md` come with their endpoints built
-in. Skip step 3: set the host's key variable, then use
-`--model <provider>/<model ID>`:
+| Role | Agent file `tools:` | Pi `--tools` |
+| --- | --- | --- |
+| `shaping-reviewer` | Read, Grep, Glob | `read,grep,find,ls` |
+| `adversarial-reviewer` | Read, Grep, Glob, Bash | `read,grep,find,ls,bash` |
+| `finding-adjudicator` | Read, Grep | `read,grep` |
+| `security-reviewer` | Read, Grep, Glob, Bash | `read,grep,find,ls,bash` |
+| `quality-engineer` | Read, Grep, Glob, Bash | `read,grep,find,ls,bash` |
 
-```bash
-export FIREWORKS_API_KEY="$(security find-generic-password -s pi-fireworks -w)"
-pi --list-models glm
-```
+The mapping is Read→`read`, Grep→`grep`, Glob→`find,ls` and Bash→`bash`.
+`edit` and `write` are never granted.
 
-### Remove it afterwards
+**`adversarial-reviewer`, `security-reviewer` and `quality-engineer` have
+`bash`.** Their lists are wider than read-only, because they rerun the
+failures they report. The limits above are tool-level
+only. Pi has no permission system, so they are not an OS sandbox. Run Pi
+inside a container when the repository holds code you do not trust.
 
-```bash
-security delete-generic-password -s pi-company-llm
-```
+## Independence
 
-Delete the `company` entry from `models.json`, then revoke the key with the
-endpoint's owner.
+agent-ready's shaping-review gate accepts "a genuinely fresh context" as an
+independent reviewer. This package claims that a fresh `--no-session` child,
+which loads no session and no context files, is that fresh context.
+
+**Whether to accept the claim is your decision** for your own review gates.
+agent-ready Core's gate text does not mention this package. If you do not
+accept it, keep a human reviewer for shaping review on Pi.
+
+The child uses the parent's model unless you map another. A different model
+for the adjudicator, as recommended under [Map a model to each role](#map-a-model-to-each-role), adds independence that a fresh
+process alone does not give.
 
 ## Skills and agents from your user profile
 
@@ -473,54 +620,6 @@ it has two limits:
 
 Running any other agent on Pi would need this package, or another one, to
 support that role and its tool allowlist.
-
-## Work in several sessions at once
-
-Give each Pi session its own git worktree: a second checkout of the same
-repository, in its own folder and on its own branch. Sessions then never edit
-each other's files.
-
-Run this from anywhere inside the repository. Change `TOPIC` for each
-session:
-
-```bash
-TOPIC=my-change                                   # a short branch name for this session
-BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD || echo origin/main)
-ROOT=$(git rev-parse --show-toplevel)
-WT="$(dirname "$ROOT")/$(basename "$ROOT")-$TOPIC"
-git fetch origin
-git worktree add -b "$TOPIC" "$WT" "$BASE"
-cd "$WT"
-pi --model company/<endpoint model ID>
-```
-
-The worktree sits beside the repository, for example `myrepo-my-change`
-next to `myrepo`. It starts from the latest remote default branch.
-
-- **Start Pi inside the worktree that holds the work.** Reviewers read files
-  at the git root of the folder Pi was started in. A session started in the
-  main checkout reviews the main checkout's files, not the worktree's.
-- **Uncommitted changes stay behind.** A new worktree has only committed work.
-- **Setup is shared.** The package install, `models.json` and the keychain
-  key are per user, so a worktree needs no setup of its own.
-- **Trust is per folder.** Pi may ask whether to trust the new folder. Give
-  the same answer you gave for the main checkout.
-- **Reviewer files must be committed.** The tool reads `.claude/agents/` or
-  `.apm/agents/` inside the worktree. Check with
-  `ls .claude/agents .apm/agents`. If they are missing because they are not
-  committed, point the tool at the main checkout:
-  `export AGENT_READY_PI_AGENTS_DIR="$ROOT/.claude/agents"`.
-
-See the open worktrees, and remove one once its branch is merged:
-
-```bash
-git worktree list
-git worktree remove "$WT"
-git branch -d "$TOPIC"
-```
-
-`git worktree remove` refuses while the worktree has uncommitted changes, so
-nothing is lost by accident.
 
 ## Configuration
 
